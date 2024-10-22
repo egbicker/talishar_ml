@@ -90,28 +90,27 @@ fli.raise_for_status()
 sli = requests.post(base_url + "APIs/GetLobbyInfo.php", json=second.lobby)
 sli.raise_for_status()
 
-submission = {"submission" : {
-    'hero' : sli.json()['deck']['hero'],
-    'deck' : sli.json()['deck']['cards'],
-    }
+s_submission = {"submission" : json.dumps({\
+    "hero" : sli.json()["deck"]["hero"],\
+    "deck" : sli.json()["deck"]["cards"],\
+    })
              }
 
-s_sb_data = {**second.lobby,**submission}
-#print(s_sb_data)
+s_sb_data = {**second.lobby,**s_submission}
 
 s_sb = requests.post(base_url + "APIs/SubmitSideboard.php", json=s_sb_data)
-print(s_sb.content)
 s_sb.raise_for_status()
 
-f_submission = fli.json()["deck"]
-f_submission["deck"] = f_submission["cards"]
-f_sb = requests.post("http://localhost/Talishar-Dev/Talishar/APIs/SubmitSideboard.php", json=dict(first.lobby, **{"submission":f_submission}))
+f_submission = {"submission" : json.dumps({\
+    "hero" : fli.json()["deck"]["hero"],\
+    "deck" : fli.json()["deck"]["cards"],\
+    })
+             }
+
+f_sb_data = {**first.lobby,**f_submission}
+
+f_sb = requests.post(base_url + "/APIs/SubmitSideboard.php", json=f_sb_data)
 f_sb.raise_for_status()
 
-#print(json.dumps(f_sb.json(),indent=4))
 
-fl = requests.post("http://localhost/Talishar-Dev/Talishar/APIs/GetLobbyRefresh.php", json=first.lobby)
-fl.raise_for_status()
-sl = requests.post("http://localhost/Talishar-Dev/Talishar/APIs/GetLobbyRefresh.php", json=second.lobby)
-sl.raise_for_status()
 
