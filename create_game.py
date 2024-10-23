@@ -1,6 +1,7 @@
 import requests
 import json
 import random
+import urllib.parse
 
 # TODO break this into its own file
 class Player:
@@ -67,6 +68,7 @@ join_data = {
 # Send the JoinGame request
 jg = requests.post(base_url + "APIs/JoinGame.php", json=join_data)
 jg.raise_for_status()
+
 # Add the authkey for P2 from the JoinGame Response
 p2.authkey = jg.json()["authKey"]
 
@@ -144,9 +146,17 @@ fl.raise_for_status()
 sl = requests.post(base_url + "APIs/GetLobbyRefresh.php", json=second.lobby)
 sl.raise_for_status()
 
+
 # Check LobbyRefresh responses before proceeding to trying to take game actions
 if not(fl.json()["isMainGameReady"] and sl.json()["isMainGameReady"]):
     raise ValueError("Game Not Ready after Sideboard Submission")
 
+# GetNextTurn isn't an API file so you have put the payload in the url instead of a json argument
+first_player_state = requests.post(base_url + "GetNextTurn.php?" + urllib.parse.urlencode({**first.lobby,"lastUpdate":0}))
 
+#"activeChainLink","opponentHand","opponentHealth","opponentSoulCount","opponentDiscard","opponentPitchCount","opponentPitch","opponentDeckCount","opponentDeck","opponentBanish","opponentEquipment", "playerHand","playerHealth","playerSoulCount","playerDiscard","playerPitchCount","playerPitch","playerDeckCount","playerDeck","playerBanish","playerEquipment","opponentArse","playerArse","combatChainLinks","opponentAllies","opponentAuras","opponentItems","opponentPermanents","playerAllies","playerAuras","playerItems"."playerPermanents","landmarks","opponentEffects","playerEffects","newEvents","turnPhase","havePriority","opponentAP","playerAP","lastPlayedCard","amIActivePlayer","turnPlayer","1","playerPrompt","playerInputPopUp","canPassPhase","preventPassPrompt
+"
+if not first_player_state.json()["hasPriority"]:
+    raise ValueError("First Player does not have priority at game start")
 
+print(first_player_state.content)
