@@ -1,7 +1,7 @@
 import requests
 import json
-import random
 import urllib.parse
+from jsondiff import diff
 
 # TODO break this into its own file
 class Player:
@@ -153,10 +153,97 @@ if not(fl.json()["isMainGameReady"] and sl.json()["isMainGameReady"]):
 
 # GetNextTurn isn't an API file so you have put the payload in the url instead of a json argument
 first_player_state = requests.post(base_url + "GetNextTurn.php?" + urllib.parse.urlencode({**first.lobby,"lastUpdate":0}))
-
-#"activeChainLink","opponentHand","opponentHealth","opponentSoulCount","opponentDiscard","opponentPitchCount","opponentPitch","opponentDeckCount","opponentDeck","opponentBanish","opponentEquipment", "playerHand","playerHealth","playerSoulCount","playerDiscard","playerPitchCount","playerPitch","playerDeckCount","playerDeck","playerBanish","playerEquipment","opponentArse","playerArse","combatChainLinks","opponentAllies","opponentAuras","opponentItems","opponentPermanents","playerAllies","playerAuras","playerItems"."playerPermanents","landmarks","opponentEffects","playerEffects","newEvents","turnPhase","havePriority","opponentAP","playerAP","lastPlayedCard","amIActivePlayer","turnPlayer","1","playerPrompt","playerInputPopUp","canPassPhase","preventPassPrompt
-"
-if not first_player_state.json()["hasPriority"]:
+first_player_state.raise_for_status()
+# "activeChainLink": {
+#        "reactions": list,
+#        "attackTarget": str,
+#        "damagePrevention": str(int),
+#        "goAgain": bool,
+#        "dominate": bool,
+#        "overpower": bool,
+#        "wager": bool,
+#        "phantasm": bool,
+#        "fusion": bool,
+#        "fused": bool,
+#        "totalAttack": int,
+#        "totalDefence": int }
+# "opponentHand": [{"cardNumber": "CardBack"}]
+# "opponentHealth": str(int)
+# "opponentSoulCount": int
+# "opponentDiscard": [{"cardNumber": str(card_id)}]
+# "opponentPitchCount": str(int)
+# "opponentPitch": []
+# "opponentDeckCount": int
+# "opponentDeck": []
+# "opponentBanish": []
+# "opponentEquipment": [<dict>]
+# "playerHand"
+# "playerHealth"
+# "playerSoulCount"
+# "playerDiscard"
+# "playerPitchCount"
+# "playerPitch"
+# "playerDeckCount"
+# "playerDeck"
+# "playerBanish"
+# "playerEquipment"
+# "opponentArse"
+# "playerArse"
+# "combatChainLinks"
+# "opponentAllies"
+# "opponentAuras"
+# "opponentItems"
+# "opponentPermanents"
+# "playerAllies"
+# "playerAuras"
+# "playerItems"
+# "playerPermanents"
+# "landmarks"
+# "opponentEffects"
+# "playerEffects"
+# "newEvents"
+# "turnPhase"
+# "havePriority"
+# "opponentAP"
+# "playerAP"
+# "lastPlayedCard"
+# "amIActivePlayer"
+# "turnPlayer"
+# "playerPrompt"
+# "playerInputPopUp"{
+#        "active": false,
+#        "buttons": []
+#    },
+# "canPassPhase"
+# "preventPassPrompt"
+f_gamestate = first_player_state.json()
+if not (f_gamestate["havePriority"] and f_gamestate["amIActivePlayer"]):
     raise ValueError("First Player does not have priority at game start")
 
-print(first_player_state.content)
+# This is where RL agent decisions start
+
+# Starting with the first player:
+# - 1. Check for start of turn input pop ups
+# - 2. Check for start of action phase input pop ups
+# - 3. Find all legal actions that can be taken
+#       - Check for action points
+#       - Check total resources available for each possible action to avoid undos when trying to play something you can't afford
+#       - Legal target checks for each possible action that targets (Rattle, etc.)
+# - 4. Have the agent make a choice and send the appropriate request
+# - 5. If the current player has priority, get legal targets again
+#       - Otherwise, go get legal actions for non-turn player (this is probably just pass prio)
+# - 6. Repeat 3-5 until turn player chooses to pass
+# - Repeat 1-6 until end condition (game winner or both players start their turn with no legal game actions 3 times in a row)
+
+
+# Check to see what legal plays we have available:
+# - Activate Hero
+# - Activate Weapon(s)
+# - Activate Equipment
+# - Play Card
+#       - Arsenal
+#       - Hand
+#       - Banish
+#       - GY
+#       - Top of Deck
+# - Pass
