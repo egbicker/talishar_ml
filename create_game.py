@@ -10,15 +10,57 @@ class Player:
         self.decklink = decklink
         self.authkey = "" 
         self.player_id = player_id
+        self.state = {}
 
 # TODO break this into its own file?
 class Game:
     # Initialize the Game object with the format and visiblity
     # TODO: Is visibilty needed?
-    def __init__(self, gformat, visibility="public"):
-        self.format = gformat
+    def __init__(self, game_format, p1, p2, visibility="public"):
+        self.format = game_format
         self.visibility = visibility
         self.name = -1
+        self.p1 = p1
+        self.p2 = p2
+        self.state = {}
+
+    def update_game_state(self, game_state_first, game_state_second):
+        game_state_keys = ["turnPhase", \
+            "activeChainLink", \
+            "combatChainLinks", \
+            "lastPlayedCard", \
+            "turnPlayer", \
+            "turnNo", \
+            #"landmarks"
+            ]
+        self.state = {key : game_state_first[key] for key in game_state_keys}
+        self.opp_player_to_p1_p2(game_state_first, game_state_second)
+
+    def opp_player_to_p1_p2(self, player_state, opp_state):
+        player, opp = (p1, p2) if player_state["turnPlayer"] == 1 else (p2, p1)
+        state_keys = ["playerHand", \
+                "playerHealth", \
+                #"playerSoulCount", \
+                "playerDiscard", \
+                "playerPitchCount", \
+                "playerPitch", \
+                "playerDeckCount", \
+                "playerDeck", \
+                #"playerBanish", \
+                "playerEquipment", \
+                "playerArse", \
+                #"playerAllies", \
+                #"playerAuras", \
+                #"playerItems", \
+                #"playerPermanents", \
+                "playerEffects",  \
+                "playerAP", \
+                "havePriority"
+                ]
+        player.state = {key : player_state[key] for key in state_keys}
+        opp.state = {key : opp_state[key] for key in state_keys}
+
+
 
 #TODO make this an argument for docker to pass in?
 base_url = "http://localhost/Talishar-Dev/Talishar/"       
@@ -28,6 +70,8 @@ base_url = "http://localhost/Talishar-Dev/Talishar/"
 p1_decklink = "https://fabrary.net/decks/01JAHPB4M9T9TW9JZ8PC89HMP1"
 p2_decklink = "https://fabrary.net/decks/01JAR0J9S97AQB84FFQ96ZWQHV"
 
+seed = 123456789
+
 # Initialize Players 1 and 2
 p1 = Player(p1_decklink, 1)
 p2 = Player(p2_decklink, 2)
@@ -35,17 +79,19 @@ p2 = Player(p2_decklink, 2)
 # Initialize Game
 # TODO: Add in format conversions from text to talishar enum
 # 10 is open blitz for Ira decks since only 30 cards
-game = Game(10)
+game = Game(10, p1, p2)
 
 # Data required to send a CreateGame request
 create_data = {
-        "fabdb" : p1.decklink,  
+        "fabdb" : p1.decklink,
         "format" : game.format,
         "visibility" : game.visibility,
+        "seed" : seed,
         }
 # Send CreateGame request
-cg = requests.post(base_url + "APIs/CreateGame.php", data=create_data)
+cg = requests.post(base_url + "APIs/CreateGame.php", json=create_data)
 cg.raise_for_status()
+
 # Get P1 authKey and game name from the CreateGame Response
 p1.authkey = cg.json()["authKey"]
 game.name = cg.json()["gameName"]
@@ -154,60 +200,19 @@ if not(fl.json()["isMainGameReady"] and sl.json()["isMainGameReady"]):
 # GetNextTurn isn't an API file so you have put the payload in the url instead of a json argument
 first_player_state = requests.post(base_url + "GetNextTurn.php?" + urllib.parse.urlencode({**first.lobby,"lastUpdate":0}))
 first_player_state.raise_for_status()
-# "activeChainLink": {
-#        "reactions": list,
-#        "attackTarget": str,
-#        "damagePrevention": str(int),
-#        "goAgain": bool,
-#        "dominate": bool,
-#        "overpower": bool,
-#        "wager": bool,
-#        "phantasm": bool,
-#        "fusion": bool,
-#        "fused": bool,
-#        "totalAttack": int,
-#        "totalDefence": int }
-# "opponentHand": [{"cardNumber": "CardBack"}]
-# "opponentHealth": str(int)
-# "opponentSoulCount": int
-# "opponentDiscard": [{"cardNumber": str(card_id)}]
-# "opponentPitchCount": str(int)
-# "opponentPitch": []
-# "opponentDeckCount": int
-# "opponentDeck": []
-# "opponentBanish": []
-# "opponentEquipment": [<dict>]
-# "playerHand"
-# "playerHealth"
-# "playerSoulCount"
-# "playerDiscard"
-# "playerPitchCount"
-# "playerPitch"
-# "playerDeckCount"
-# "playerDeck"
-# "playerBanish"
-# "playerEquipment"
-# "opponentArse"
-# "playerArse"
-# "combatChainLinks"
-# "opponentAllies"
-# "opponentAuras"
-# "opponentItems"
-# "opponentPermanents"
-# "playerAllies"
-# "playerAuras"
-# "playerItems"
-# "playerPermanents"
-# "landmarks"
-# "opponentEffects"
-# "playerEffects"
+f_gamestate = first_player_state.json()
+
+second_player_state = requests.post(base_url + "GetNextTurn.php?" + urllib.parse.urlencode({**second.lobby,"lastUpdate":0}))
+second_player_state.raise_for_status()
+s_gamestate = second_player_state.json()
+
+
+if not (f_gamestate["havePriority"] and (int(f_gamestate["turnPlayer"]) == first.player_id)):
+    raise ValueError("First Player does not have priority at game start")
+
+
+game.update_game_state(f_gamestate, s_gamestate)
 # "newEvents"
-# "turnPhase"
-# "havePriority"
-# "opponentAP"
-# "playerAP"
-# "lastPlayedCard"
-# "amIActivePlayer"
 # "turnPlayer"
 # "playerPrompt"
 # "playerInputPopUp"{
@@ -216,15 +221,16 @@ first_player_state.raise_for_status()
 #    },
 # "canPassPhase"
 # "preventPassPrompt"
-f_gamestate = first_player_state.json()
-if not (f_gamestate["havePriority"] and f_gamestate["amIActivePlayer"]):
-    raise ValueError("First Player does not have priority at game start")
 
 # This is where RL agent decisions start
-
-# Starting with the first player:
-# - 1. Check for start of turn input pop ups
-# - 2. Check for start of action phase input pop ups
+def get_legal_actions():
+        legal_actions = ["pass"]
+        if f_gamestate["playerInputPopUp"]["active"]:
+                has_buttons = bool(f_gamestate["playerInputPopUp"]["buttons"])
+                has_cards = bool("cards" in f_gamestate["playerInputPopUp"])
+                        # Agent makes a choice
+                
+# Starting with the first player
 # - 3. Find all legal actions that can be taken
 #       - Check for action points
 #       - Check total resources available for each possible action to avoid undos when trying to play something you can't afford
