@@ -16,16 +16,17 @@ class Player:
 class Game:
     # Initialize the Game object with the format and visiblity
     # TODO: Is visibilty needed?
-    def __init__(self, game_format, p1, p2, visibility="public"):
-        self.format = game_format
+    def __init__(self, p1, p2, visibility="public"):
+        self.format = 10
         self.visibility = visibility
         self.name = -1
         self.p1 = p1
         self.p2 = p2
-        self.state = {}
+        self.state = {"p1" : {}, "p2": {}}
 
     def update_game_state(self, game_state_first, game_state_second):
-        game_state_keys = ["turnPhase", \
+        self.opp_player_to_p1_p2(game_state_first, game_state_second)
+        game_state_keys = [#"turnPhase", \
             "activeChainLink", \
             "combatChainLinks", \
             "lastPlayedCard", \
@@ -34,25 +35,20 @@ class Game:
             #"landmarks"
             ]
         self.state = {key : game_state_first[key] for key in game_state_keys}
-        self.opp_player_to_p1_p2(game_state_first, game_state_second)
+        self.state["p1"] = self.p1.state
+        self.state["p2"] = self.p2.state
 
     def opp_player_to_p1_p2(self, player_state, opp_state):
         player, opp = (p1, p2) if player_state["turnPlayer"] == 1 else (p2, p1)
         state_keys = ["playerHand", \
                 "playerHealth", \
-                #"playerSoulCount", \
                 "playerDiscard", \
                 "playerPitchCount", \
                 "playerPitch", \
                 "playerDeckCount", \
                 "playerDeck", \
-                #"playerBanish", \
                 "playerEquipment", \
                 "playerArse", \
-                #"playerAllies", \
-                #"playerAuras", \
-                #"playerItems", \
-                #"playerPermanents", \
                 "playerEffects",  \
                 "playerAP", \
                 "havePriority"
@@ -60,7 +56,15 @@ class Game:
         player.state = {key : player_state[key] for key in state_keys}
         opp.state = {key : opp_state[key] for key in state_keys}
 
-
+    def get_legal_actions(self):
+        # http://localhost:5173/api/ProcessInput.php?gameName=104&playerID=1&authKey=5e38ba3e009a98d8c5840c46d523d10d7e12148633641de8a4799ce54f765deb&mode=4&cardID=DTD227
+        # http://localhost:5173/api/ProcessInput.php?gameName=104&playerID=2&authKey=cf95fda4c475174511ca36c992f1805d51ffce6c589054a8a0162195159e0f97&mode=99&buttonInput=undefined&inputText=undefined&cardID=undefined
+        actions = [{"mode":99, "buttonInput":"undefined", "inputText":"undefined", "cardID":"undefined"}]
+        turn_dict = self.state["p"+ self.state["turnPlayer"]]
+        actions.append([card for card in turn_dict["hand"] if card["borderColor"] == 6])
+        actions.append([card for card in turn_dict["playerEquipment"] if (not card["cardNumber"] == "NONE00" and card["borderColor"]==6)])
+        actions.append([card for card in turn_dict["playerArse"] if card["borderColor"] == 6])
+        return actions
 
 #TODO make this an argument for docker to pass in?
 base_url = "http://localhost/Talishar-Dev/Talishar/"       
@@ -79,7 +83,7 @@ p2 = Player(p2_decklink, 2)
 # Initialize Game
 # TODO: Add in format conversions from text to talishar enum
 # 10 is open blitz for Ira decks since only 30 cards
-game = Game(10, p1, p2)
+game = Game(p1, p2)
 
 # Data required to send a CreateGame request
 create_data = {
@@ -212,25 +216,12 @@ if not (f_gamestate["havePriority"] and (int(f_gamestate["turnPlayer"]) == first
 
 
 game.update_game_state(f_gamestate, s_gamestate)
-# "newEvents"
-# "turnPlayer"
-# "playerPrompt"
-# "playerInputPopUp"{
-#        "active": false,
-#        "buttons": []
-#    },
-# "canPassPhase"
-# "preventPassPrompt"
 
-# This is where RL agent decisions start
-def get_legal_actions():
-        legal_actions = ["pass"]
-        if f_gamestate["playerInputPopUp"]["active"]:
-                has_buttons = bool(f_gamestate["playerInputPopUp"]["buttons"])
-                has_cards = bool("cards" in f_gamestate["playerInputPopUp"])
-                        # Agent makes a choice
-                
-# Starting with the first player
+
+
+
+
+# Starting with thei first player
 # - 3. Find all legal actions that can be taken
 #       - Check for action points
 #       - Check total resources available for each possible action to avoid undos when trying to play something you can't afford
