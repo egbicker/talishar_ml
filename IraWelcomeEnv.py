@@ -1,31 +1,18 @@
-import requests
+
+from copy import copy
+import functools
 import json
 import urllib.parse
+import requests
 
-import gym
-from gym import spaces
-
-
-class Player():
-    def __init__(self, deck_link, player_id):
-        self.decklink = deck_link
-        self.player_id = player_id
-        self.authkey = ""
-        self.state = {}
+from gymnasium import spaces
+import numpy as np
+from pettingzoo import AECEnv
+from pettingzoo.utils import agent_selector
 
 
-class IraWelcomeEnv(gym.Env):
-    def __init__(self, base_url,
-                 p1_decklink="https://fabrary.net/decks/01JAHPB4M9T9TW9JZ8PC89HMP1",
-                 p2_decklink="https://fabrary.net/decks/01JAR0J9S97AQB84FFQ96ZWQHV"):
-        self.base_url = base_url
-        self.p1_decklink = p1_decklink
-        self.p2_decklink = p2_decklink
-        self.format = 10  # open blitz
-        self.name = ""
-        self.deck_cards = ["CRU063", "WTR191", "CRU069", "CRU072", "CRU073", "CRU187", "CRU074", "CRU194", "WTR100", "CRU186"]
-        self.arena_cards = self.deck_cards + ["CRU050"]
-        self.card_effects = ["CRU046", "CRU072", "CRU186"]
+class IraWelcomeEnv(AECEnv):
+
     # Ignore: 
         # Banish : Not Applicable
         # Equipment : Not Applicable
@@ -42,10 +29,45 @@ class IraWelcomeEnv(gym.Env):
         # Player Effects limited to the 3 in the deck
         # Max Hand Size is 6
         # All 3 mistblossoms hitting draws 6 but costs 4 or 5 cards
-        self.observation_space = spaces.Dict(
-            {
-                "p1_deck_size": spaces.Discrete(30),  # integer values [0,30]
-                "p2_deck_size": spaces.Discrete(30),  # integer values [0,30]
+
+    metadata = {
+        "name": "Ira_Welcome_v0",
+    }
+
+    def __init__(self, base_url,
+                 p1_decklink="https://fabrary.net/decks/01JAHPB4M9T9TW9JZ8PC89HMP1",
+                 p2_decklink="https://fabrary.net/decks/01JAR0J9S97AQB84FFQ96ZWQHV",
+                 render_mode=None):
+
+        self.possible_agents = ["p" + str(r) for r in range(1, 3)]
+        self.base_url = base_url
+        self.p1_decklink = p1_decklink
+        self.p2_decklink = p2_decklink
+        self.game = 0
+        self.format = 10  # open blitz
+        self.deck_cards = [["CRU063", 2, 1],
+                           ["WTR191", 0, 1],
+                           ["CRU069", 1, 1],
+                           ["CRU072", 1, 2],
+                           ["CRU073", 0, 2],
+                           ["CRU187", 0, 2],
+                           ["CRU074", 1, 2],
+                           ["CRU194", 2, 3],
+                           ["WTR100", 0, 3],
+                           ["CRU186", 0, 3]]
+        self.card_info = {
+
+        }
+        self.arena_cards = self.deck_cards + [("CRU050", 1, 0)]
+        self.card_effects = ["CRU046", "CRU072", "CRU186"]
+        self.state = {}
+
+
+    @functools.lru_cache(maxsize=None)
+    def observation_space(self, agent):
+        return spaces.Dict({
+                "deck_size": spaces.Discrete(30),  # integer values [0,30]}
+                "opp_deck_size": spaces.Discrete(30),  # integer values [0,30]}
                 # Flying Kick, CRU063
                 # Scar for a Scar, WTR191
                 # Torrent of Tempo, CRU069
@@ -56,26 +78,38 @@ class IraWelcomeEnv(gym.Env):
                 # Brutal Assault, CRU194
                 # Head Jab, WTR100
                 # Lunging Press, CRU186
-                "p1_discard": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
-                "p2_discard": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4]),
-                "p1_pitch": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4]),
-                "p2_pitch": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4]),
-                "p1_hand": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4]),
-                "p2_hand": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4]),
-                "p1_arsenal": spaces.MultiDiscrete([2,2,2,2,2,2,2,2,2,2]),
-                "p2_arsenal": spaces.MultiDiscrete([2,2,2,2,2,2,2,2,2,2]),
-                "p1_resources": spaces.Discrete(3),  # integer value [0,2]
-                "p2_resources": spaces.Discrete(3),  # integer value [0,2]
-                "p1_health": spaces.Discrete(21),  # integer values [0,20]
-                "p2_health": spaces.Discrete(21),  # integer values [0,20]
+                "discard": spaces.MultiDiscrete(
+                                                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+                                            ),
+                "opp_discard": spaces.MultiDiscrete(
+                                                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+                                            ),
+                "pitch": spaces.MultiDiscrete(
+                                                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+                                            ),
+                "opp_pitch": spaces.MultiDiscrete(
+                                                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+                                            ),
+                "hand": spaces.MultiDiscrete(
+                                                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+                                            ),
+                "opp_hand": spaces.Discrete(6),  # 0,1,2,3,4,>4
+                "arsenal": spaces.MultiDiscrete(
+                                                [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+                                                ),
+                "opp_arsenal": spaces.Binary(1),
+                "resources": spaces.Discrete(3),  # integer value [0,2]
+                "opp_resources": spaces.Discrete(3),  # integer value [0,2]
+                "health": spaces.Discrete(21),  # integer values [0,20]
+                "opp_health": spaces.Discrete(21),  # integer values [0,20]
                 # Ira
                 # Lunging Press
                 # Bittering Thorns
-                "p1_effects": spaces.MultiBinary(3),
-                "p2_effects": spaces.MultiBinary(3),
-                "p1_ap": spaces.Discrete(2),  # integer value [0,1]
-                "p2_ap": spaces.Discrete(2),  # integer value [0,1]
-                "turn_player": spaces.Discrete(2, start=1),  # integer value [1,2]
+                "effects": spaces.MultiBinary(3),
+                "opp_effects": spaces.MultiBinary(3),
+                "ap": spaces.Discrete(2),  # integer value [0,1]
+                "opp_ap": spaces.Discrete(2),  # integer value [0,1]
+                "turn_player": spaces.Discrete(2, start=1),
                 # Flying Kick, CRU063
                 # Scar for a Scar, WTR191
                 # Torrent of Tempo, CRU069
@@ -87,187 +121,422 @@ class IraWelcomeEnv(gym.Env):
                 # Head Jab, WTR100
                 # Lunging Press, CRU186
                 # Edge of Autumn, CRU050
-                "p1_combat_chain": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4,2]),
-                "p2_combat_chain": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4,2]),
+                "combat_chain": spaces.MultiDiscrete([4,4,4,4,4,4,4,4,4,4,2]),
                 "last_played_card": spaces.MultiDiscrete([2,2,2,2,2,2,2,2,2,2,2], start=1)
-            }
-        )
-        # Same 11 as observation_space["last_played_card"] but with a 12th option for passing
+        })
+        # Same 11 as observation_space["last_played_card"]
+        # but with a 12th option for passing
         # 0 is not played, 1 is from hand, 2 from arsenal
         # Edge of Autumn and
-        self.action_space = spaces.MultiDiscrete([3,3,3,3,3,3,3,3,3,3,2,2])
 
-    def reset(self, seed=None, options=None):
-        self.p1 = Player(self.p1_decklink, 1)
-        self.p2 = Player(self.p2_decklink, 2)
+    @functools.lru_cache(maxsize=None)
+    def action_space(self, agent):
+        return spaces.OneOf(spaces.MultiDiscrete(np.ones(22)), start=1)
+
+    def reset(self, seed=None):
+        self.name = ""
+        self.players = {"p1": {
+                            "decklink": self.p1_decklink,
+                            "player_id": 1,
+                            "authKey": "",
+                            "lobby": {}
+                        },
+                        "p2": {
+                            "decklink": self.p2_decklink,
+                            "player_id": 2,
+                            "authKey": "",
+                            "lobby": {}
+                        }
+                        }
+        
+        self.agents = copy(self.possible_agents)
+        self._cumulative_rewards = {agent: 0 for agent in self.agents}
+
         # Data required to send a CreateGame request
         create_data = {
-                "fabdb": self.p1.decklink,
+                "fabdb": self.players["p1"]["decklink"],
                 "format": self.format,
                 "seed": seed,
                 }
         # Send CreateGame request
-        cg = requests.post(self.base_url + "APIs/CreateGame.php", json=create_data)
-        if cg.status_code == requests.codes.okay:
+        cg = requests.post(self.base_url + "APIs/CreateGame.php",
+                           json=create_data,
+                           timeout=2)
+        if cg.status_code == requests.codes.ok:
             # TODO Docker startup logic
             pass
         else:
             cg.raise_for_status()
 
         # Get P1 authKey and game name from the CreateGame Response
-        self.p1.authkey = cg.json()["authKey"]
+        self.players["p1"]["authKey"] = cg.json()["authKey"]
         self.name = cg.json()["gameName"]
 
         # Data needed to request info on the lobby for player 1
         # Add this to the player object since it'll get reused
-        self.p1.lobby = {
+        self.players["p1"]["lobby"] = {
                 "gameName": self.name,
-                "playerID": self.p1.player_id,
-                "authKey": self.p1.authkey
+                "playerID": self.players["p1"]["player_id"],
+                "authKey": self.players["p1"]["authKey"]
                 }
 
         # Data required to send a JoinGame request for P2
         join_data = {
-                "playerID": self.p2.player_id,
-                "fabdb": self.p2.decklink,
+                "playerID": self.players["p2"]["player_id"],
+                "fabdb": self.players["p1"]["decklink"],
                 "gameName": self.name,
                 }
 
         # Send the JoinGame request
-        jg = requests.post(self.base_url + "APIs/JoinGame.php", json=join_data)
+        jg = requests.post(self.base_url + "APIs/JoinGame.php",
+                           json=join_data,
+                           timeout=2)
         jg.raise_for_status()
 
         # Add the authkey for P2 from the JoinGame Response
-        self.p2.authkey = jg.json()["authKey"]
+        self.players["p2"]["authKey"] = jg.json()["authKey"]
 
         # Data needed to request info on the lobby for player 1
         # Add this to the player object since it'll get reused
-        self.p2.lobby = {
+        self.players["p2"]["lobby"] = {
                 "gameName": self.name,
-                "playerID": self.p2.player_id,
-                "authKey": self.p2.authkey
+                "playerID": self.players["p2"]["player_id"],
+                "authKey": self.players["p2"]["authKey"]
                 }
-        # Request Lobby Refresh to get result of die roll for first player choice
+
+        # Request Lobby Refresh
+        # get result of die roll for first player choice
         # The player used to request shouldn't matter
-        p2l = requests.post(self.base_url + "APIs/GetLobbyRefresh.php", json=self.p2.lobby)
+        p2l = requests.post(self.base_url + "APIs/GetLobbyRefresh.php",
+                            json=self.players["p2"]["lobby"],
+                            timeout=2)
         p2l.raise_for_status()
 
-        # Assign first and second player pointers based on the LobbyRefresh Response
-        # Currently the player that wins the die roll (amIChoosingFirstPlayer == True) goes first
+        self._agent_selector = agent_selector(agent_order=self.agents)
+        self.agent_selection = self._agent_selector.next()
+
+        # Assign first and second player pointers
+        # based on the LobbyRefresh Response
+        # Currently the player that wins the die roll
+        # (amIChoosingFirstPlayer == True) goes first
         # TODO: Add logic to make this a choice the agent can perform
-        first, second = (self.p2,self.p1) if p2l.json()["amIChoosingFirstPlayer"] else (self.p1, self.p2)
+        first, second = (self.players["p2"], self.players["p1"])\
+            if p2l.json()["amIChoosingFirstPlayer"]\
+            else (self.players["p1"], self.players["p2"])
 
         # Data to send ChooseFirstPlayer request
         # first points to the player object that chose to go first
+
         first_data = {
-                "playerID": first.player_id,
+                "playerID": first["player_id"],
                 "gameName": self.name,
                 "action": "Go First",
-                "authKey": first.authkey
-                }   
+                "authKey": first["authKey"]
+                }
 
         # Send ChooseFirstPlayer request
-        cf = requests.post(self.base_url + "APIs/ChooseFirstPlayer.php", json=first_data)
+        cf = requests.post(self.base_url + "APIs/ChooseFirstPlayer.php",
+                           json=first_data,
+                           timeout=2)
         cf.raise_for_status()
 
         # Send LobbyInfo request for first player
-        fli = requests.post(self.base_url + "APIs/GetLobbyInfo.php", json=first.lobby)
+        fli = requests.post(self.base_url + "APIs/GetLobbyInfo.php",
+                            json=first["lobby"],
+                            timeout=2)
         fli.raise_for_status()
 
-        # Create data for P1 SubmitSideboard request based on LobbyInfo response data
+        # Create data for P1 SubmitSideboard request
+        # based on LobbyInfo response data
         f_submission = {"submission": json.dumps({
             "hero": fli.json()["deck"]["hero"],
             "deck": fli.json()["deck"]["cards"],
             })
                     }
         # Combine submission and lobby info for p1 SubmitSideboard Request data
-        f_sb_data = {**first.lobby, **f_submission}
+        f_sb_data = {**first["lobby"], **f_submission}
 
         # Send the SubmitSideboard request for p1
-        f_sb = requests.post(self.base_url + "/APIs/SubmitSideboard.php", json=f_sb_data)
+        f_sb = requests.post(self.base_url + "/APIs/SubmitSideboard.php",
+                             json=f_sb_data,
+                             timeout=2)
         f_sb.raise_for_status()
 
         # Send LobbyInfo request for second player
-        sli = requests.post(self.base_url + "APIs/GetLobbyInfo.php", json=second.lobby)
+        sli = requests.post(self.base_url + "APIs/GetLobbyInfo.php",
+                            json=second["lobby"],
+                            timeout=2)
         sli.raise_for_status()
 
-        # Create data for P2 SubmitSideboard request based on LobbyInfo response data
+        # Create data for P2 SubmitSideboard request
+        # based on LobbyInfo response data
         # json.dumps() not str or it'll 500 on the json_decode()
-        s_submission = {"submission" : json.dumps({
+        s_submission = {"submission": json.dumps({
             "hero": sli.json()["deck"]["hero"],
             "deck": sli.json()["deck"]["cards"],
-            })
-                    }
+            })}
 
         # Combine submission and lobby info for p2 SubmitSideboard Request data
-        s_sb_data = {**second.lobby, **s_submission}
+        s_sb_data = {**second["lobby"], **s_submission}
 
         # Send the SubmitSideboard request for p2
-        s_sb = requests.post(self.base_url + "APIs/SubmitSideboard.php", json=s_sb_data)
+        s_sb = requests.post(self.base_url + "APIs/SubmitSideboard.php",
+                             json=s_sb_data,
+                             timeout=2)
         s_sb.raise_for_status()
 
         # Send LobbyRefresh for both players to check isMainGameReady
-        fl = requests.post(self.base_url + "APIs/GetLobbyRefresh.php", json=first.lobby)
+        fl = requests.post(self.base_url + "APIs/GetLobbyRefresh.php",
+                           json=first["lobby"],
+                           timeout=2)
         fl.raise_for_status()
-        # Asking for both players might be redundant but rather safe than sorry at this point
-        sl = requests.post(self.base_url + "APIs/GetLobbyRefresh.php", json=second.lobby)
+        # Asking for both players might be redundant
+        sl = requests.post(self.base_url + "APIs/GetLobbyRefresh.php",
+                           json=second["lobby"],
+                           timeout=2)
         sl.raise_for_status()
 
-        # Check LobbyRefresh responses before proceeding to trying to take game actions
+        # Check LobbyRefresh responses before trying to take game actions
         if not (fl.json()["isMainGameReady"] and sl.json()["isMainGameReady"]):
             raise ValueError("Game Not Ready after Sideboard Submission")
 
         # Set initial state
-        # GetNextTurn isn't an API file so you have put the payload in the url instead of a json argument
-        first_player_state = requests.post(self.base_url + "GetNextTurn.php?" + urllib.parse.urlencode({**first.lobby,"lastUpdate":0}))
+        # GetNextTurn isn't an API file so you have put the payload in the url
+        # instead of a json argument
+        first_player_state = requests.post(self.base_url +
+                                           "GetNextTurn.php?" +
+                                           urllib.parse.urlencode(
+                                               {**first["lobby"],
+                                                "lastUpdate": 0}),
+                                           timeout=2)
         first_player_state.raise_for_status()
         first_state = first_player_state.json()
 
-        second_player_state = requests.post(self.base_url + "GetNextTurn.php?" + urllib.parse.urlencode({**second.lobby,"lastUpdate":0}))
+        second_player_state = requests.post(self.base_url +
+                                            "GetNextTurn.php?" +
+                                            urllib.parse.urlencode(
+                                                {**second["lobby"],
+                                                 "lastUpdate": 0}),
+                                            timeout=2)
         second_player_state.raise_for_status()
         second_state = second_player_state.json()
 
-        self.p1.state, self.p2.state = (first_state, second_state) if first_state["playerID"] == 1 else (second_state, first_state)
+        self.state["p1"], self.state["p2"] = (first_state, second_state) \
+            if first_state["turnPlayer"] == 1 \
+            else (second_state, first_state)
 
-        return self._get_obs()
+        observations = {agent: {"observation": self._get_obs(agent),
+                        "action_mask": self._get_mask(agent)}
+                        for agent in self.agents}
 
-    def _count_deck_cards(self, player, field):
-        return [[dic["cardNumber"] for dic in player.state[field]].count(card) for card in self.deck_cards]
+        infos = {a: {} for a in self.agents}
 
-    def _count_card_effects(self, player):
-        return [[dic["cardNumber"] for dic in player.state["playerEffects"]].count(card) for card in self.card_effects]
+        return observations, infos
 
-    def _get_chain_link(self, player):
-        return [[dic["cardName"] for dic in player.state["activeChainLink"]["reactions"] if player.state["playerID"]==dic["controller"]].count(card) for card in self.arena_cards]
+    def _count_deck_cards(self, agent, field):
+        return [[dic["cardNumber"]
+                for dic in agent[field]].count(card[0])
+                for card in self.deck_cards]
 
-    def _get_obs(self):
-        return {
-            "p1_deck_size": self.p1.state["playerDeckCount"],
-            "p1_discard": self._count_deck_cards(self.p1, "playerDiscard"),
-            "p1_pitch": self._count_deck_cards(self.p1, "playerPitch"),
-            "p1_hand": self._count_deck_cards(self.p1, "playerHand"),
-            "p1_arsenal": self._count_deck_cards(self.p1, "playerArse"),
-            "p1_resources": self.p1.state["playerPitchCount"],
-            "p1_health": self.p1.state["playerHealth"],
-            "p1_effects": self._count_card_effects(self.p1),
-            "p1_ap": self.p1.state["playerAP"],
-            "p2_deck_size": self.p2.state["playerDeckCount"],
-            "p12_discard": self._count_deck_cards(self.p2, "playerDiscard"),
-            "p2_pitch": self._count_deck_cards(self.p2, "playerPitch"),
-            "p2_hand": self._count_deck_cards(self.p2, "playerHand"),
-            "p2_arsenal": self._count_deck_cards(self.p2, "playerArse"),
-            "p2_resources": self.p2.state["playerPitchCount"],
-            "p2_health": self.p2.state["playerHealth"],
-            "p2_effects": self._count_card_effects(self.p2),
-            "p2_ap": self.p2.state["playerAP"],
-            "turn_player": self.p1.state["playerID"] if self.p1.state["turnPlayer"] else self.p2.state["playerID"],
-            "p1_combat_chain": self._get_chain_link(self.p1),
-            "p2_combat_chain": self._get_chain_link(self.p2),
-            "last_played_card": [self.p1.state["lastPlayedCard"]["controller"] if card == self.p1.state["lastPlayedCard"]["cardNumber"] else 0 for card in self.arena_cards]
+    def _player_card_effects(self, agent):
+        return (
+            [[dic["cardNumber"]
+                for dic in agent["playerEffects"]].count(card)
+                for card in self.card_effects],
+
+            [[dic["cardNumber"]
+                for dic in agent["opponentEffects"]].count(card)
+                for card in self.card_effects]
+                )
+
+    def _get_chain_link(self, agent):
+        return [[dic["cardName"]
+                for dic in agent["activeChainLink"]["reactions"]
+                if
+                self.state[agent]["playerID"] == dic["controller"]].count(card)
+                for card in self.arena_cards]
+
+    def _get_obs(self, agent):
+
+        obs = {
+            "deck_size": self.state[agent]["playerDeckCount"],
+            "opp_deck_size": self.state[agent]["opponentDeckCount"],
+            "discard": self._count_deck_cards(self.state[agent],
+                                              "playerDiscard"),
+            "opp_discard": self._count_deck_cards(self.state[agent],
+                                                  "opponentDiscard"),
+            "pitch": self._count_deck_cards(self.state[agent], "playerPitch"),
+            "opp_pitch": self._count_deck_cards(self.state[agent],
+                                                "opponentPitch"),
+            "hand": self._count_deck_cards(self.state[agent], "playerHand"),
+            "opp_hand": len(self._count_deck_cards(self.state[agent],
+                            "opponentHand")),
+            "arsenal": self._count_deck_cards(self.state[agent], "playerArse"),
+            "opp_arsenal": len(self._count_deck_cards(self.state[agent],
+                               "opponentArse")),
+            "resources": self.state[agent]["playerPitchCount"],
+            "opp_resources": self.state[agent]["opponentPitchCount"],
+            "health": self.state[agent]["playerHealth"],
+            "opp_health": self.state[agent]["opponentHealth"],
+            "ap": self.state[agent]["playerAP"],
+            "opp_ap": self.state[agent]["playerAP"],
+            "turn_player": self.state[agent]["turnPlayer"],
+            "combat_chain": self._get_chain_link(self.state[agent]),
+            "last_played_card":
+                [self.state[agent]["lastPlayedCard"]["controller"]
+                    if
+                    card == self.state[agent]["lastPlayedCard"]["cardNumber"]
+                    else 0
+                    for card in self.arena_cards]
         }
+        obs["effects"], obs["opp_effects"] = self._player_card_effects(
+                                             self.state[agent])
+
+        return obs
+
+    def _can_afford(self, agent, index):
+        # No way to increase the costs of things
+        # Only thing the non-turn player can play is somersault which costs 0
+
+        # Check if there are enough resources floating for the turn player
+        # If not, see if there is at least one card in hand
+
+        res = self.state[agent]["playerPitchCount"]
+
+        if index < len(self.deck_cards):
+            card = self.deck_cards[index]
+        elif len(self.deck_cards) <= index < 20:
+            card = self.deck_cards[index-len(self.deck_cards)]
+        elif index == 20:
+            card = self.arena_cards[-1]
+        else:
+            raise IndexError("invalid index provided")
+
+        if card[1] <= res:
+            return 1
+        else:
+            hand = [c["cardName"] for c in self.state[agent]["playerHand"]]
+            hand.remove(card[0])
+            if res + sum([dc[2] for h in hand for dc in self.deck_cards
+                          if h == dc[0]]) > card[1]:
+                return 0
+            else:
+                return 1
+
+    def _get_mask(self, agent):
+        action_mask = np.zeros(22, dtype=np.int8)
+
+        if self.state[agent]["playerArse"] and \
+           self.state[agent]["playerArse"][0]["borderColor"] == 6:
+            action_mask[[card[0] for card in self.deck_cards].index(
+                           self.state[agent]["playerArse"][0]["cardNumber"])
+                        ] = 1
+
+        for card in self.state[agent]["playerHand"]:
+            if card["borderColor"] == 6:
+                action_mask[len(self.deck_cards) + [card[0]for card in
+                            self.deck_cards].index(card["cardNumber"])] = 1
+
+        for card in self.state[agent]["playerEquipment"]:
+            if card["type"] == "W" and card["borderColor"] == 6:
+                action_mask[20] = 1
+                break
+
+        action_mask[21] = 1
+
+        action_mask = [self._can_afford(agent, index)
+                       for mask, index in enumerate(action_mask[0:-1]) if mask]
+
+        return action_mask
+
+    def observe(self, agent):
+        return self._get_obs(agent)
+
+    def _action_to_request(self, action, agent):
+        opp = self.agents[0] if agent == "p2" else self.agents[1]
+        # Play out an arsenal card
+        if action[0] < len(self.deck_cards):
+            # The active agent should have a card in arsenal and that card
+            # should be the one that made it through the mask
+            assert self.state[agent]["playerArse"][0]["cardNumber"] == \
+                   self.deck_cards[action[0]][0]
+
+            # mode = 5 for arsenal
+            # cardID = 0 for a single arsenal
+            play_arsenal = requests.post(self.base_url +
+                                         "apis/ProccessInput.php?" +
+                                         urllib.parse.urlencode(
+                                            {**self.players[agent]["lobby"],
+                                             "mode": 5,
+                                             "cardID": 0}),
+                                         timeout=2)
+            play_arsenal.raise_for_status()
+
+        # Play out a card from hand
+        elif len(self.deck_cards) <= action[0] < 20:
+            card_id = self.deck_cards[action[0]+len(self.deck_cards)][0]
+            index = [card["cardID"]
+                     for card in self.state[agent]["playerHand"]
+                     ].index(card_id)
+
+            play_hand = requests.post(self.base_url +
+                                      "apis/ProccessInput.php?" +
+                                      urllib.parse.urlencode(
+                                            {**self.players[agent]["lobby"],
+                                             "mode": 27,
+                                             "cardID": index}),
+                                      timeout=2)
+
+            play_hand.raise_for_status()
+
+        # Activate Edge of Autumn
+        elif action[0] == 20:
+            activate_weapon = requests.post(
+                                        self.base_url +
+                                        "apis/ProccessInput.php?" +
+                                        urllib.parse.urlencode(
+                                            {**self.players[agent]["lobby"],
+                                                "mode": 3,
+                                                "cardID": 13}),
+                                        timeout=2)
+
+            activate_weapon.raise_for_status()
+
+        # Pass
+        # This is the only time we should swap agents
+        elif action[0] == 21:
+            pass_payload = {"mode": 99,
+                            "buttonInput": "undefined",
+                            "inputText": "undefined",
+                            "cardID": "undefined"}
+
+            request_pass = requests.post(self.base_url +
+                                         "apis/ProccessInput.php?" +
+                                         urllib.parse.urlencode(
+                                             {**self.players[agent]["lobby"],
+                                              **pass_payload}),
+                                         timeout=2)
+            request_pass.raise_for_status()
+
+        agent_state = requests.post(self.base_url + "GetNextTurn.php?" +
+                                    urllib.parse.urlencode(
+                                        {**self.players[agent]["lobby"],
+                                            "lastUpdate": 0}),
+                                    timeout=2)
+        agent_state.raise_for_status()
+
+        opp_state = requests.post(self.base_url +
+                                  "GetNextTurn.php?" +
+                                  urllib.parse.urlencode(
+                                    {**self.players[opp]["lobby"],
+                                     "lastUpdate": 0}),
+                                  timeout=2)
+        opp_state.raise_for_status()
+
+        self.state["p1"], self.state["p2"] = (agent_state, opp_state)\
+            if agent == "p1" else (opp_state, agent_state)
 
     def step(self, action):
-        # action is a 1x12 vector
-        # apply invalid action mask
-        turn_player = self.p1 if self.p1.state["turnPlayer"] == 1 else self.p2
-        
+
+        self._accumulate_rewards()
+        # return observations, rewards, terminations, truncations, infos
