@@ -55,9 +55,7 @@ class IraWelcomeEnv(AECEnv):
                            ["CRU194", 2, 3],
                            ["WTR100", 0, 3],
                            ["CRU186", 0, 3]]
-        self.card_info = {
 
-        }
         self.arena_cards = self.deck_cards + [("CRU050", 1, 0)]
         self.card_effects = ["CRU046", "CRU072", "CRU186"]
         self.state = {}
@@ -131,7 +129,7 @@ class IraWelcomeEnv(AECEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        return spaces.OneOf(spaces.MultiDiscrete(np.ones(22)), start=1)
+        return spaces.OneOf([spaces.Discrete(1, start=1) for i in range(22)])
 
     def reset(self, seed=None):
         self.name = ""
@@ -150,7 +148,11 @@ class IraWelcomeEnv(AECEnv):
                         }
         
         self.agents = copy(self.possible_agents)
+        self.rewards = {i: 0 for i in self.agents}
         self._cumulative_rewards = {agent: 0 for agent in self.agents}
+        self.terminations = {agent: False for agent in self.agents}
+        self.truncations = {agent: False for agent in self.agents}
+        self.infos = {i: {} for i in self.agents}
 
         # Data required to send a CreateGame request
         create_data = {
@@ -324,6 +326,7 @@ class IraWelcomeEnv(AECEnv):
         self.state["p1"], self.state["p2"] = (first_state, second_state) \
             if first_state["turnPlayer"] == 1 \
             else (second_state, first_state)
+        self._state_str_to_int()
 
         observations = {agent: {"observation": self._get_obs(agent),
                         "action_mask": self._get_mask(agent)}
@@ -379,7 +382,7 @@ class IraWelcomeEnv(AECEnv):
             "health": self.state[agent]["playerHealth"],
             "opp_health": self.state[agent]["opponentHealth"],
             "ap": self.state[agent]["playerAP"],
-            "opp_ap": self.state[agent]["playerAP"],
+            "opp_ap": self.state[agent]["opponentAP"],
             "turn_player": self.state[agent]["turnPlayer"],
             "combat_chain": self._get_chain_link(self.state[agent]),
             "last_played_card":
@@ -402,7 +405,6 @@ class IraWelcomeEnv(AECEnv):
         # If not, see if there is at least one card in hand
 
         res = self.state[agent]["playerPitchCount"]
-
         if index < len(self.deck_cards):
             card = self.deck_cards[index]
         elif len(self.deck_cards) <= index < 20:
@@ -412,16 +414,13 @@ class IraWelcomeEnv(AECEnv):
         else:
             raise IndexError("invalid index provided")
 
-        if card[1] <= res:
-            return 1
-        else:
-            hand = [c["cardName"] for c in self.state[agent]["playerHand"]]
+        if card[1] > res:
+            hand = [c["cardNumber"] for c in self.state[agent]["playerHand"]]
             hand.remove(card[0])
             if res + sum([dc[2] for h in hand for dc in self.deck_cards
                           if h == dc[0]]) > card[1]:
                 return 0
-            else:
-                return 1
+        return 1
 
     def _get_mask(self, agent):
         action_mask = np.zeros(22, dtype=np.int8)
@@ -445,12 +444,18 @@ class IraWelcomeEnv(AECEnv):
         action_mask[21] = 1
 
         action_mask = [self._can_afford(agent, index)
-                       for mask, index in enumerate(action_mask[0:-1]) if mask]
+                       for index, mask in enumerate(action_mask[0:-1]) if mask]
 
         return action_mask
 
     def observe(self, agent):
         return self._get_obs(agent)
+
+    def _state_str_to_int(self):
+        keys = ["playerDeckCount", "opponentDeckCount","playerPitchCount","opponentPitchCount","playerHealth", "opponentHealth", "playerAP","opponentAP"]
+        for agent in self.agents:
+            for key, val in self.state[agent].items():
+                self.state[agent][key] = int(val) if key in keys else val
 
     def _action_to_request(self, action, agent):
         opp = self.agents[0] if agent == "p2" else self.agents[1]
@@ -536,7 +541,36 @@ class IraWelcomeEnv(AECEnv):
         self.state["p1"], self.state["p2"] = (agent_state, opp_state)\
             if agent == "p1" else (opp_state, agent_state)
 
+        self._state_str_to_int()
+
     def step(self, action):
+        if (
+            self.terminations[self.agent_selection]
+            or self.truncations[self.agent_selection]
+        ):
+            pass
+
+        next_agent = self._agent_selector.next()
+        player_cards = len(self.state[self.agent_selection]["playerHand"]) + len(self.state[self.agent_selection]["playerArse"]) + self.state[self.agent_selection]["playerDeckCount"]
+        opp_cards = len(self.state[self.agent_selection]["opponentHand"]) + len(self.state[self.agent_selection]["opponentArse"]) + self.state[self.agent_selection]["opponentDeckCount"]
+
+        # check if there is a winner
+        if self.state[self.agent_selection]["opponentHealth"] <= 0:
+            # self.rewards[self.agent_selection] += 1
+            # self.rewards[next_agent] -= 1
+            self.terminations = {i: True for i in self.agents}
+
+        elif self.state[self.agent_selection]["playerHealth"] <= 0:
+            # self.rewards[self.agent_selection] -= 1
+            # self.rewards[next_agent] += 1
+            self.terminations = {i: True for i in self.agents}
+
+        elif player_cards + opp_cards == 0:
+            # once either play wins or there is a draw, game over, both players are done
+            self.terminations = {i: True for i in self.agents}
+
+        if not self.state[self.agent_selection]["havePriority"]:
+            self.agent_selection = next_agent
 
         self._accumulate_rewards()
         # return observations, rewards, terminations, truncations, infos
