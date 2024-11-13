@@ -121,7 +121,9 @@ class IraWelcomeEnv(AECEnv):
                         [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], start=1
                     ),
                 },
-                "action_mask": spaces.Tuple([spaces.Discrete(1, start=1) for i in range(22)]),
+                "action_mask": spaces.Tuple(
+                    [spaces.Discrete(1, start=1) for i in range(22)]
+                ),
             }
         )
         # Same 11 as observation_space["last_played_card"]
@@ -478,15 +480,27 @@ class IraWelcomeEnv(AECEnv):
                 action_mask[20] = 1
                 break
 
-
         action_mask = [
             self._can_afford(agent, index) if mask else 0
             for index, mask in enumerate(action_mask)
         ]
 
         action_mask.append(1)
-        print(action_mask, tuple(np.array(np.int8(i)).reshape(1,) for i in action_mask))
-        return tuple(np.array(np.int8(i)).reshape(1,) for i in action_mask)
+        print(
+            action_mask,
+            tuple(
+                np.array(np.int8(i)).reshape(
+                    1,
+                )
+                for i in action_mask
+            ),
+        )
+        return tuple(
+            np.array(np.int8(i)).reshape(
+                1,
+            )
+            for i in action_mask
+        )
 
     def observe(self, agent):
         observations = {
@@ -558,9 +572,11 @@ class IraWelcomeEnv(AECEnv):
         elif len(self.deck_cards) <= action[0] < 20:
 
             card_id = self.deck_cards[action[0] - len(self.deck_cards)][0]
-            print(action[0], card_id,[
-                card["cardNumber"] for card in self.state[agent]["playerHand"]
-            ])
+            print(
+                action[0],
+                card_id,
+                [card["cardNumber"] for card in self.state[agent]["playerHand"]],
+            )
             index = [
                 card["cardNumber"] for card in self.state[agent]["playerHand"]
             ].index(card_id)
@@ -626,7 +642,9 @@ class IraWelcomeEnv(AECEnv):
         opp_state.raise_for_status()
 
         self.state["p1"], self.state["p2"] = (
-            (agent_state.json(), opp_state.json()) if agent == "p1" else (opp_state.json(), agent_state.json())
+            (agent_state.json(), opp_state.json())
+            if agent == "p1"
+            else (opp_state.json(), agent_state.json())
         )
 
         self._state_str_to_int()
