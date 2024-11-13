@@ -11,12 +11,10 @@ for agent in env.agent_iter():
     if termination or truncation:
         action = None
     else:
-        if isinstance(observation, dict) and "action_mask" in observation:
-            mask = observation["action_mask"]
+        if isinstance(observation, dict) and "action_mask" in observation[agent]:
+            mask = observation[agent]["action_mask"]
         else:
             mask = None
         action = env.action_space(agent).sample(mask)
-        print(action)
-        exit
     env.step(action)
 env.close()
