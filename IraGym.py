@@ -11,7 +11,9 @@ for agent in env.agent_iter():
     if termination or truncation:
         action = None
     else:
-        if isinstance(observation, dict) and "action_mask" in observation[agent]:
+        if isinstance(
+                observation,
+                dict) and "action_mask" in observation[agent]:
             mask = observation[agent]["action_mask"]
         else:
             mask = None

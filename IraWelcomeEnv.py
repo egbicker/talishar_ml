@@ -1,11 +1,11 @@
-from copy import copy
 import functools
 import json
 import urllib.parse
-import requests
+from copy import copy
 
-from gymnasium import spaces
 import numpy as np
+import requests
+from gymnasium import spaces
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 
@@ -70,7 +70,8 @@ class IraWelcomeEnv(AECEnv):
             {
                 "observation": {
                     "deck_size": spaces.Discrete(30),  # integer values [0,30]}
-                    "opp_deck_size": spaces.Discrete(30),  # integer values [0,30]}
+                    # integer values [0,30]}
+                    "opp_deck_size": spaces.Discrete(30),
                     # Flying Kick, CRU063
                     # Scar for a Scar, WTR191
                     # Torrent of Tempo, CRU069
@@ -163,7 +164,7 @@ class IraWelcomeEnv(AECEnv):
             "format": self.format,
             "seed": seed,
         }
-        # Send CreateGame request 
+        # Send CreateGame request
         cg = requests.post(
             self.base_url + "APIs/CreateGame.php", json=create_data, timeout=5
         )
@@ -245,14 +246,18 @@ class IraWelcomeEnv(AECEnv):
 
         # Send ChooseFirstPlayer request
         cf = requests.post(
-            self.base_url + "APIs/ChooseFirstPlayer.php", json=first_data, timeout=2
-        )
+            self.base_url +
+            "APIs/ChooseFirstPlayer.php",
+            json=first_data,
+            timeout=2)
         cf.raise_for_status()
 
         # Send LobbyInfo request for first player
         fli = requests.post(
-            self.base_url + "APIs/GetLobbyInfo.php", json=first["lobby"], timeout=2
-        )
+            self.base_url +
+            "APIs/GetLobbyInfo.php",
+            json=first["lobby"],
+            timeout=2)
         fli.raise_for_status()
 
         # Create data for P1 SubmitSideboard request
@@ -270,14 +275,18 @@ class IraWelcomeEnv(AECEnv):
 
         # Send the SubmitSideboard request for p1
         f_sb = requests.post(
-            self.base_url + "/APIs/SubmitSideboard.php", json=f_sb_data, timeout=2
-        )
+            self.base_url +
+            "/APIs/SubmitSideboard.php",
+            json=f_sb_data,
+            timeout=2)
         f_sb.raise_for_status()
 
         # Send LobbyInfo request for second player
         sli = requests.post(
-            self.base_url + "APIs/GetLobbyInfo.php", json=second["lobby"], timeout=2
-        )
+            self.base_url +
+            "APIs/GetLobbyInfo.php",
+            json=second["lobby"],
+            timeout=2)
         sli.raise_for_status()
 
         # Create data for P2 SubmitSideboard request
@@ -297,19 +306,25 @@ class IraWelcomeEnv(AECEnv):
 
         # Send the SubmitSideboard request for p2
         s_sb = requests.post(
-            self.base_url + "APIs/SubmitSideboard.php", json=s_sb_data, timeout=2
-        )
+            self.base_url +
+            "APIs/SubmitSideboard.php",
+            json=s_sb_data,
+            timeout=2)
         s_sb.raise_for_status()
 
         # Send LobbyRefresh for both players to check isMainGameReady
         fl = requests.post(
-            self.base_url + "APIs/GetLobbyRefresh.php", json=first["lobby"], timeout=2
-        )
+            self.base_url +
+            "APIs/GetLobbyRefresh.php",
+            json=first["lobby"],
+            timeout=2)
         fl.raise_for_status()
         # Asking for both players might be redundant
         sl = requests.post(
-            self.base_url + "APIs/GetLobbyRefresh.php", json=second["lobby"], timeout=2
-        )
+            self.base_url +
+            "APIs/GetLobbyRefresh.php",
+            json=second["lobby"],
+            timeout=2)
         sl.raise_for_status()
 
         # Check LobbyRefresh responses before trying to take game actions
@@ -378,7 +393,7 @@ class IraWelcomeEnv(AECEnv):
             ],
         )
 
-    def _get_chain_link(self,agent):
+    def _get_chain_link(self, agent):
         return [
             [
                 dic["cardNumber"]
@@ -447,10 +462,8 @@ class IraWelcomeEnv(AECEnv):
         if card[1] > res:
             hand = [c["cardNumber"] for c in self.state[agent]["playerHand"]]
             hand.remove(card[0])
-            if (
-                res + sum([dc[2] for h in hand for dc in self.deck_cards if h == dc[0]])
-                < card[1]
-            ):
+            if (res + sum([dc[2]
+                           for h in hand for dc in self.deck_cards if h == dc[0]]) < card[1]):
                 return 0
         return 1
 
@@ -543,11 +556,13 @@ class IraWelcomeEnv(AECEnv):
         ):
             card_id = self.deck_cards[action + len(self.deck_cards)][0]
             arse_hand = requests.post(
-                self.base_url
-                + "ProcessInput.php?"
-                + urllib.parse.urlencode(
-                    {**self.players[agent]["lobby"], "mode": 4, "cardID": card_id}
-                ),
+                self.base_url +
+                "ProcessInput.php?" +
+                urllib.parse.urlencode(
+                    {
+                        **self.players[agent]["lobby"],
+                        "mode": 4,
+                        "cardID": card_id}),
                 timeout=2,
             )
 
@@ -561,11 +576,13 @@ class IraWelcomeEnv(AECEnv):
             ].index(card_id)
 
             play_hand = requests.post(
-                self.base_url
-                + "ProcessInput.php?"
-                + urllib.parse.urlencode(
-                    {**self.players[agent]["lobby"], "mode": 27, "cardID": index}
-                ),
+                self.base_url +
+                "ProcessInput.php?" +
+                urllib.parse.urlencode(
+                    {
+                        **self.players[agent]["lobby"],
+                        "mode": 27,
+                        "cardID": index}),
                 timeout=2,
             )
 
@@ -605,17 +622,23 @@ class IraWelcomeEnv(AECEnv):
             request_pass.raise_for_status()
 
         agent_state = requests.post(
-            self.base_url
-            + "GetNextTurn.php?"
-            + urllib.parse.urlencode({**self.players[agent]["lobby"], "lastUpdate": 0}),
+            self.base_url +
+            "GetNextTurn.php?" +
+            urllib.parse.urlencode(
+                {
+                    **self.players[agent]["lobby"],
+                    "lastUpdate": 0}),
             timeout=2,
         )
         agent_state.raise_for_status()
 
         opp_state = requests.post(
-            self.base_url
-            + "GetNextTurn.php?"
-            + urllib.parse.urlencode({**self.players[opp]["lobby"], "lastUpdate": 0}),
+            self.base_url +
+            "GetNextTurn.php?" +
+            urllib.parse.urlencode(
+                {
+                    **self.players[opp]["lobby"],
+                    "lastUpdate": 0}),
             timeout=2,
         )
         opp_state.raise_for_status()
@@ -659,12 +682,14 @@ class IraWelcomeEnv(AECEnv):
             self.terminations = {i: True for i in self.agents}
 
         elif player_cards + opp_cards == 0:
-            # once either play wins or there is a draw, game over, both players are done
+            # once either play wins or there is a draw, game over, both players
+            # are done
             self.terminations = {i: True for i in self.agents}
 
         self._action_to_request(action, self.agent_selection)
 
         if not self.state[self.agent_selection]["havePriority"]:
             self.agent_selection = next_agent
-        print(self.state["p1"]["playerHealth"], self.state["p2"]["playerHealth"])
+        print(self.state["p1"]["playerHealth"],
+              self.state["p2"]["playerHealth"])
         self._accumulate_rewards()
