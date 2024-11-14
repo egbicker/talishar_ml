@@ -433,7 +433,6 @@ class IraWelcomeEnv(AECEnv):
 
         # Check if there are enough resources floating for the turn player
         # If not, see if there is at least one card in hand
-
         res = self.state[agent]["playerPitchCount"]
         if index < len(self.deck_cards):
             card = self.deck_cards[index]
@@ -446,7 +445,8 @@ class IraWelcomeEnv(AECEnv):
 
         if card[1] > res:
             hand = [c["cardNumber"] for c in self.state[agent]["playerHand"]]
-            hand.remove(card[0])
+            if len(self.deck_cards) <= index < 20:
+                hand.remove(card[0])
             if (
                 res + sum([dc[2] for h in hand for dc in self.deck_cards if h == dc[0]])
                 < card[1]
@@ -455,7 +455,7 @@ class IraWelcomeEnv(AECEnv):
         return 1
 
     def _get_mask(self, agent):
-        action_mask = np.zeros(21, dtype=np.int8)
+        action_mask = np.zeros(22, dtype=np.int8)
         if (
             self.state[agent]["playerArse"]
             and self.state[agent]["playerArse"][0]["borderColor"] == 6
@@ -477,13 +477,24 @@ class IraWelcomeEnv(AECEnv):
             if card["type"] == "W" and card["borderColor"] == 6:
                 action_mask[20] = 1
                 break
+    
+        turn_phase = self.state[agent]["turnPhase"]["turnPhase"]
+        if not turn_phase in ["ARS", "P", "PDECK"]:
+            action_mask = [
+                self._can_afford(agent, index) if mask else 0
+                for index, mask in enumerate(action_mask)
+            ]
 
-        action_mask = [
-            self._can_afford(agent, index) if mask else 0
-            for index, mask in enumerate(action_mask)
-        ]
+        if turn_phase == "PDECK":
+            for card in self.state[agent]["playerPitch"]:
+                action_mask[
+                        len(self.deck_cards)
+                        + [card[0] for card in self.deck_cards].index(card["cardNumber"])
+                    ] = 1
 
-        action_mask.append(1)
+
+
+        action_mask[-1] = 1
 
         return np.array(np.int8(action_mask))
 
@@ -536,40 +547,30 @@ class IraWelcomeEnv(AECEnv):
             )
             play_arsenal.raise_for_status()
 
-        # Play out a card from hand
-        elif (
-            len(self.deck_cards) <= action < 20
-            and self.state[agent]["turnPhase"] == "ARS"
-        ):
-            card_id = self.deck_cards[action + len(self.deck_cards)][0]
-            arse_hand = requests.post(
-                self.base_url
-                + "ProcessInput.php?"
-                + urllib.parse.urlencode(
-                    {**self.players[agent]["lobby"], "mode": 4, "cardID": card_id}
-                ),
-                timeout=2,
-            )
-
-            arse_hand.raise_for_status()
-
         elif len(self.deck_cards) <= action < 20:
-
             card_id = self.deck_cards[action - len(self.deck_cards)][0]
-            index = [
-                card["cardNumber"] for card in self.state[agent]["playerHand"]
-            ].index(card_id)
 
-            play_hand = requests.post(
+            if self.state[agent]["turnPhase"]["turnPhase"] == "PDECK":
+                mode = 6
+            elif self.state[agent]["turnPhase"]["turnPhase"] == "ARS":
+                mode = 4
+            else:
+                mode = 27
+
+                card_id = [
+                    card["cardNumber"] for card in self.state[agent]["playerHand"]
+                ].index(card_id)
+
+            choose_hand = requests.post(
                 self.base_url
                 + "ProcessInput.php?"
                 + urllib.parse.urlencode(
-                    {**self.players[agent]["lobby"], "mode": 27, "cardID": index}
+                    {**self.players[agent]["lobby"], "mode": mode, "cardID": card_id}
                 ),
                 timeout=2,
             )
 
-            play_hand.raise_for_status()
+            choose_hand.raise_for_status()
 
         # Activate Edge of Autumn
         elif action == 20:
@@ -611,7 +612,8 @@ class IraWelcomeEnv(AECEnv):
             timeout=2,
         )
         agent_state.raise_for_status()
-
+        if agent_state.json()["turnPhase"]["turnPhase"] == "OVER":
+            return
         opp_state = requests.post(
             self.base_url
             + "GetNextTurn.php?"
@@ -633,7 +635,8 @@ class IraWelcomeEnv(AECEnv):
             self.terminations[self.agent_selection]
             or self.truncations[self.agent_selection]
         ):
-            pass
+            self._was_dead_step(action)
+            return
 
         next_agent = self._agent_selector.next()
         player_cards = (
@@ -647,22 +650,25 @@ class IraWelcomeEnv(AECEnv):
             + self.state[self.agent_selection]["opponentDeckCount"]
         )
 
+        over = self.state[self.agent_selection]["turnPhase"]["turnPhase"] == "OVER"
         # check if there is a winner
-        if self.state[self.agent_selection]["opponentHealth"] <= 0:
-            # self.rewards[self.agent_selection] += 1
-            # self.rewards[next_agent] -= 1
-            self.terminations = {i: True for i in self.agents}
+        if over:
+            if self.state[self.agent_selection]["opponentHealth"] <= 0:
+                # self.rewards[self.agent_selection] += 1
+                # self.rewards[next_agent] -= 1
+                self.terminations = {i: True for i in self.agents}
 
-        elif self.state[self.agent_selection]["playerHealth"] <= 0:
-            # self.rewards[self.agent_selection] -= 1
-            # self.rewards[next_agent] += 1
-            self.terminations = {i: True for i in self.agents}
+            elif self.state[self.agent_selection]["playerHealth"] <= 0:
+                # self.rewards[self.agent_selection] -= 1
+                # self.rewards[next_agent] += 1
+                self.terminations = {i: True for i in self.agents}
 
         elif player_cards + opp_cards == 0:
             # once either play wins or there is a draw, game over, both players are done
             self.terminations = {i: True for i in self.agents}
 
-        self._action_to_request(action, self.agent_selection)
+        else:
+            self._action_to_request(action, self.agent_selection)
 
         if not self.state[self.agent_selection]["havePriority"]:
             self.agent_selection = next_agent
