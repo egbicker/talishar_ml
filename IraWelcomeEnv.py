@@ -101,8 +101,8 @@ class IraWelcomeEnv(AECEnv):
                     "ap": spaces.Discrete(2),  # integer value [0,1]
                     "opp_ap": spaces.Discrete(2),  # integer value [0,1]
                     "turn_player": spaces.Discrete(2, start=1),
-                    # M, P, B, A, D, ARS
-                    "turn_phase": spaces.Discrete(6),
+                    # M, P, B, A, D, ARS, PDECK
+                    "turn_phase": spaces.Discrete(8),
                     # Flying Kick, CRU063
                     # Scar for a Scar, WTR191
                     # Torrent of Tempo, CRU069
@@ -121,9 +121,7 @@ class IraWelcomeEnv(AECEnv):
                         [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], start=1
                     ),
                 },
-                "action_mask": spaces.Tuple(
-                    [spaces.Discrete(1, start=1) for i in range(22)]
-                ),
+                "action_mask": spaces.Discrete(22),
             }
         )
         # Same 11 as observation_space["last_played_card"]
@@ -133,7 +131,7 @@ class IraWelcomeEnv(AECEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        return spaces.OneOf(spaces.Discrete(1, start=1) for i in range(22))
+        return spaces.Discrete(22)
 
     def reset(self, seed=None):
         self.name = ""
@@ -165,9 +163,9 @@ class IraWelcomeEnv(AECEnv):
             "format": self.format,
             "seed": seed,
         }
-        # Send CreateGame request
+        # Send CreateGame request 
         cg = requests.post(
-            self.base_url + "APIs/CreateGame.php", json=create_data, timeout=2
+            self.base_url + "APIs/CreateGame.php", json=create_data, timeout=5
         )
         if cg.status_code == requests.codes.ok:
             # TODO Docker startup logic
@@ -365,7 +363,7 @@ class IraWelcomeEnv(AECEnv):
         ]
 
     def _map_turn_phase(self, agent):
-        phases = ["M", "B", "P", "A", "D", "ARS"]
+        phases = ["M", "B", "P", "A", "D", "ARS", "PDECK", "INSTANT"]
         return phases.index(self.state[agent]["turnPhase"]["turnPhase"])
 
     def _player_card_effects(self, agent):
@@ -380,12 +378,12 @@ class IraWelcomeEnv(AECEnv):
             ],
         )
 
-    def _get_chain_link(self, agent):
+    def _get_chain_link(self,agent):
         return [
             [
-                dic["cardName"]
-                for dic in agent["activeChainLink"]["reactions"]
-                if self.state[agent]["playerID"] == dic["controller"]
+                dic["cardNumber"]
+                for dic in self.state[agent]["activeChainLink"]["reactions"]
+                if agent[-1] == dic["controller"]
             ].count(card)
             for card in self.arena_cards
         ]
@@ -413,7 +411,7 @@ class IraWelcomeEnv(AECEnv):
             "opp_ap": self.state[agent]["opponentAP"],
             "turn_player": self.state[agent]["turnPlayer"],
             "turn_phase": self._map_turn_phase(agent),
-            "combat_chain": self._get_chain_link(self.state[agent]),
+            "combat_chain": self._get_chain_link(agent),
             "last_played_card": [
                 (
                     self.state[agent]["lastPlayedCard"]["controller"]
@@ -486,21 +484,8 @@ class IraWelcomeEnv(AECEnv):
         ]
 
         action_mask.append(1)
-        print(
-            action_mask,
-            tuple(
-                np.array(np.int8(i)).reshape(
-                    1,
-                )
-                for i in action_mask
-            ),
-        )
-        return tuple(
-            np.array(np.int8(i)).reshape(
-                1,
-            )
-            for i in action_mask
-        )
+
+        return np.array(np.int8(action_mask))
 
     def observe(self, agent):
         observations = {
@@ -531,13 +516,12 @@ class IraWelcomeEnv(AECEnv):
     def _action_to_request(self, action, agent):
         opp = self.agents[0] if agent == "p2" else self.agents[1]
         # Play out an arsenal card
-        if action[0] < len(self.deck_cards):
-            print(self.state[agent]["playerArse"], action)
+        if action < len(self.deck_cards):
             # The active agent should have a card in arsenal and that card
             # should be the one that made it through the mask
             assert (
                 self.state[agent]["playerArse"][0]["cardNumber"]
-                == self.deck_cards[action[0]][0]
+                == self.deck_cards[action][0]
             )
 
             # mode = 5 for arsenal
@@ -554,10 +538,10 @@ class IraWelcomeEnv(AECEnv):
 
         # Play out a card from hand
         elif (
-            len(self.deck_cards) <= action[0] < 20
+            len(self.deck_cards) <= action < 20
             and self.state[agent]["turnPhase"] == "ARS"
         ):
-            card_id = self.deck_cards[action[0] + len(self.deck_cards)][0]
+            card_id = self.deck_cards[action + len(self.deck_cards)][0]
             arse_hand = requests.post(
                 self.base_url
                 + "ProcessInput.php?"
@@ -569,14 +553,9 @@ class IraWelcomeEnv(AECEnv):
 
             arse_hand.raise_for_status()
 
-        elif len(self.deck_cards) <= action[0] < 20:
+        elif len(self.deck_cards) <= action < 20:
 
-            card_id = self.deck_cards[action[0] - len(self.deck_cards)][0]
-            print(
-                action[0],
-                card_id,
-                [card["cardNumber"] for card in self.state[agent]["playerHand"]],
-            )
+            card_id = self.deck_cards[action - len(self.deck_cards)][0]
             index = [
                 card["cardNumber"] for card in self.state[agent]["playerHand"]
             ].index(card_id)
@@ -593,7 +572,7 @@ class IraWelcomeEnv(AECEnv):
             play_hand.raise_for_status()
 
         # Activate Edge of Autumn
-        elif action[0] == 20:
+        elif action == 20:
             activate_weapon = requests.post(
                 self.base_url
                 + "ProcessInput.php?"
@@ -607,7 +586,7 @@ class IraWelcomeEnv(AECEnv):
 
         # Pass
         # This is the only time we should swap agents
-        elif action[0] == 21:
+        elif action == 21:
             pass_payload = {
                 "mode": 99,
                 "buttonInput": "undefined",
@@ -683,9 +662,9 @@ class IraWelcomeEnv(AECEnv):
             # once either play wins or there is a draw, game over, both players are done
             self.terminations = {i: True for i in self.agents}
 
+        self._action_to_request(action, self.agent_selection)
+
         if not self.state[self.agent_selection]["havePriority"]:
             self.agent_selection = next_agent
-        self._action_to_request(action, self.agent_selection)
+        print(self.state["p1"]["playerHealth"], self.state["p2"]["playerHealth"])
         self._accumulate_rewards()
-
-    # return observations, rewards, terminations, truncations, infos

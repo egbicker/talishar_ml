@@ -16,5 +16,6 @@ for agent in env.agent_iter():
         else:
             mask = None
         action = env.action_space(agent).sample(mask)
+        print(action)
     env.step(action)
 env.close()
