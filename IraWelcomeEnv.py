@@ -102,7 +102,7 @@ class IraWelcomeEnv(AECEnv):
                     "opp_ap": spaces.Discrete(2),  # integer value [0,1]
                     "turn_player": spaces.Discrete(2, start=1),
                     # M, P, B, A, D, ARS, PDECK
-                    "turn_phase": spaces.Discrete(8),
+                    "turn_phase": spaces.Discrete(9),
                     # Flying Kick, CRU063
                     # Scar for a Scar, WTR191
                     # Torrent of Tempo, CRU069
@@ -163,7 +163,7 @@ class IraWelcomeEnv(AECEnv):
             "format": self.format,
             "seed": seed,
         }
-        # Send CreateGame request 
+        # Send CreateGame request
         cg = requests.post(
             self.base_url + "APIs/CreateGame.php", json=create_data, timeout=5
         )
@@ -363,7 +363,7 @@ class IraWelcomeEnv(AECEnv):
         ]
 
     def _map_turn_phase(self, agent):
-        phases = ["M", "B", "P", "A", "D", "ARS", "PDECK", "INSTANT"]
+        phases = ["M", "B", "P", "A", "D", "ARS", "PDECK", "INSTANT", "OVER"]
         return phases.index(self.state[agent]["turnPhase"]["turnPhase"])
 
     def _player_card_effects(self, agent):
@@ -378,7 +378,7 @@ class IraWelcomeEnv(AECEnv):
             ],
         )
 
-    def _get_chain_link(self,agent):
+    def _get_chain_link(self, agent):
         return [
             [
                 dic["cardNumber"]
@@ -477,7 +477,7 @@ class IraWelcomeEnv(AECEnv):
             if card["type"] == "W" and card["borderColor"] == 6:
                 action_mask[20] = 1
                 break
-    
+
         turn_phase = self.state[agent]["turnPhase"]["turnPhase"]
         if not turn_phase in ["ARS", "P", "PDECK"]:
             action_mask = [
@@ -488,14 +488,11 @@ class IraWelcomeEnv(AECEnv):
         if turn_phase == "PDECK":
             for card in self.state[agent]["playerPitch"]:
                 action_mask[
-                        len(self.deck_cards)
-                        + [card[0] for card in self.deck_cards].index(card["cardNumber"])
-                    ] = 1
-
-
+                    len(self.deck_cards)
+                    + [card[0] for card in self.deck_cards].index(card["cardNumber"])
+                ] = 1
 
         action_mask[-1] = 1
-
         return np.array(np.int8(action_mask))
 
     def observe(self, agent):
@@ -594,7 +591,6 @@ class IraWelcomeEnv(AECEnv):
                 "inputText": "undefined",
                 "cardID": "undefined",
             }
-
             request_pass = requests.post(
                 self.base_url
                 + "ProcessInput.php?"
@@ -612,8 +608,6 @@ class IraWelcomeEnv(AECEnv):
             timeout=2,
         )
         agent_state.raise_for_status()
-        if agent_state.json()["turnPhase"]["turnPhase"] == "OVER":
-            return
         opp_state = requests.post(
             self.base_url
             + "GetNextTurn.php?"
@@ -639,14 +633,17 @@ class IraWelcomeEnv(AECEnv):
             return
 
         next_agent = self._agent_selector.next()
+        # TODO Arsenal considerations for draw state
+        # - card in arsenal that can't be paid for
+        # - somersault vs opp with no cards in hand/deck
+        # - press in arsenal when player has no attacks
         player_cards = (
             len(self.state[self.agent_selection]["playerHand"])
-            + len(self.state[self.agent_selection]["playerArse"])
+            + len(self.state[self.agent_selection]["playerPitch"])
             + self.state[self.agent_selection]["playerDeckCount"]
         )
         opp_cards = (
             len(self.state[self.agent_selection]["opponentHand"])
-            + len(self.state[self.agent_selection]["opponentArse"])
             + self.state[self.agent_selection]["opponentDeckCount"]
         )
 
@@ -654,18 +651,21 @@ class IraWelcomeEnv(AECEnv):
         # check if there is a winner
         if over:
             if self.state[self.agent_selection]["opponentHealth"] <= 0:
-                # self.rewards[self.agent_selection] += 1
-                # self.rewards[next_agent] -= 1
+                print(self.agent_selection + " won")
+                self.rewards[self.agent_selection] += 1
+                self.rewards[next_agent] -= 1
                 self.terminations = {i: True for i in self.agents}
 
             elif self.state[self.agent_selection]["playerHealth"] <= 0:
-                # self.rewards[self.agent_selection] -= 1
-                # self.rewards[next_agent] += 1
+                print(self.agent_selection + " lost")
+                self.rewards[self.agent_selection] -= 1
+                self.rewards[next_agent] += 1
                 self.terminations = {i: True for i in self.agents}
 
         elif player_cards + opp_cards == 0:
             # once either play wins or there is a draw, game over, both players are done
             self.terminations = {i: True for i in self.agents}
+            print("draw")
 
         else:
             self._action_to_request(action, self.agent_selection)
