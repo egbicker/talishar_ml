@@ -349,8 +349,8 @@ class raw_env(AECEnv):
 
         observations = {
             agent: {
-                "observation": self._get_obs(agent),
-                "action_mask": self._get_mask(agent),
+                "observation": self.get_obs(agent),
+                "action_mask": self.get_mask(agent),
             }
             for agent in self.agents
         }
@@ -391,7 +391,7 @@ class raw_env(AECEnv):
             for card in self.arena_cards
         ]
 
-    def _get_obs(self, agent):
+    def get_obs(self, agent):
 
         obs = {
             "deck_size": self.state[agent]["playerDeckCount"],
@@ -457,7 +457,7 @@ class raw_env(AECEnv):
                 return 0
         return 1
 
-    def _get_mask(self, agent):
+    def get_mask(self, agent):
         action_mask = np.zeros(22, dtype=np.int8)
         if (
             self.state[agent]["playerArse"]
@@ -501,8 +501,8 @@ class raw_env(AECEnv):
     def observe(self, agent):
         observations = {
             agent: {
-                "observation": self._get_obs(agent),
-                "action_mask": self._get_mask(agent),
+                "observation": self.get_obs(agent),
+                "action_mask": self.get_mask(agent),
             }
             for agent in self.agents
         }
