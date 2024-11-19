@@ -1,4 +1,4 @@
-from talishar-ml.Ira-Welcome.ira_welcome import ira_welcome_v0
+from IraWelcome.ira_welcome import ira_welcome_v0
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.common.wrappers import ActionMasker
