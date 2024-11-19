@@ -5,12 +5,18 @@ import urllib.parse
 import requests
 
 from gymnasium import spaces
+import jsondiff as jd
 import numpy as np
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 
+from sys import getsizeof
 
-class IraWelcomeEnv(AECEnv):
+def env(**kwargs):
+    env = raw_env(**kwargs)
+    return env
+
+class raw_env(AECEnv):
 
     # Ignore:
     # Banish : Not Applicable
@@ -63,6 +69,7 @@ class IraWelcomeEnv(AECEnv):
         self.arena_cards = self.deck_cards + [("CRU050", 1, 0)]
         self.card_effects = ["CRU046", "CRU072", "CRU186"]
         self.state = {}
+        self.state_hist = []
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -265,12 +272,10 @@ class IraWelcomeEnv(AECEnv):
                 }
             )
         }
-        # Combine submission and lobby info for p1 SubmitSideboard Request data
-        f_sb_data = {**first["lobby"], **f_submission}
 
         # Send the SubmitSideboard request for p1
         f_sb = requests.post(
-            self.base_url + "/APIs/SubmitSideboard.php", json=f_sb_data, timeout=2
+            self.base_url + "/APIs/SubmitSideboard.php", json={**first["lobby"], **f_submission}, timeout=2
         )
         f_sb.raise_for_status()
 
@@ -292,12 +297,9 @@ class IraWelcomeEnv(AECEnv):
             )
         }
 
-        # Combine submission and lobby info for p2 SubmitSideboard Request data
-        s_sb_data = {**second["lobby"], **s_submission}
-
         # Send the SubmitSideboard request for p2
         s_sb = requests.post(
-            self.base_url + "APIs/SubmitSideboard.php", json=s_sb_data, timeout=2
+            self.base_url + "APIs/SubmitSideboard.php", json={**second["lobby"], **s_submission}, timeout=2
         )
         s_sb.raise_for_status()
 
@@ -343,6 +345,7 @@ class IraWelcomeEnv(AECEnv):
             else (second_state, first_state)
         )
         self._state_str_to_int()
+        self.state_hist.append(self.state)
 
         observations = {
             agent: {
@@ -504,7 +507,7 @@ class IraWelcomeEnv(AECEnv):
             for agent in self.agents
         }
 
-        return observations
+        return observations  
 
     def _state_str_to_int(self):
         keys = [
@@ -651,13 +654,11 @@ class IraWelcomeEnv(AECEnv):
         # check if there is a winner
         if over:
             if self.state[self.agent_selection]["opponentHealth"] <= 0:
-                print(self.agent_selection + " won")
                 self.rewards[self.agent_selection] += 1
                 self.rewards[next_agent] -= 1
                 self.terminations = {i: True for i in self.agents}
 
             elif self.state[self.agent_selection]["playerHealth"] <= 0:
-                print(self.agent_selection + " lost")
                 self.rewards[self.agent_selection] -= 1
                 self.rewards[next_agent] += 1
                 self.terminations = {i: True for i in self.agents}
@@ -665,12 +666,14 @@ class IraWelcomeEnv(AECEnv):
         elif player_cards + opp_cards == 0:
             # once either play wins or there is a draw, game over, both players are done
             self.terminations = {i: True for i in self.agents}
-            print("draw")
+
+        elif int(self.state[self.agent_selection]["turnNo"]) > 60:
+            self.truncations = {i: True for i in self.agents}
 
         else:
             self._action_to_request(action, self.agent_selection)
+        self.state_hist.append(self.state)
 
         if not self.state[self.agent_selection]["havePriority"]:
             self.agent_selection = next_agent
-        print(self.state["p1"]["playerHealth"], self.state["p2"]["playerHealth"])
         self._accumulate_rewards()
