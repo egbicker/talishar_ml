@@ -12,9 +12,11 @@ from pettingzoo.utils import agent_selector
 
 from sys import getsizeof
 
+
 def env(**kwargs):
     env = raw_env(**kwargs)
     return env
+
 
 class raw_env(AECEnv):
 
@@ -41,12 +43,13 @@ class raw_env(AECEnv):
 
     def __init__(
         self,
-        base_url,
+        base_url="http://localhost/Talishar-Dev/Talishar/",
         p1_decklink="https://fabrary.net/decks/01JAHPB4M9T9TW9JZ8PC89HMP1",
         p2_decklink="https://fabrary.net/decks/01JAR0J9S97AQB84FFQ96ZWQHV",
         render_mode=None,
     ):
 
+        self.base_url = base_url
         self.possible_agents = ["p" + str(r) for r in range(1, 3)]
         self.base_url = base_url
         self.p1_decklink = p1_decklink
@@ -70,77 +73,73 @@ class raw_env(AECEnv):
         self.card_effects = ["CRU046", "CRU072", "CRU186"]
         self.state = {}
         self.state_hist = []
+        self.obs_max = [30,30, 3*np.ones(50), 6, np.ones(11),2,2,20,20,np.ones(8),2,8,3*np.ones(10), np.ones(12)]
 
-    @functools.lru_cache(maxsize=None)
-    def observation_space(self, agent):
+    def observation_space(self,agent):
         return spaces.Dict(
             {
-                "observation": {
-                    "deck_size": spaces.Discrete(30),  # integer values [0,30]}
-                    "opp_deck_size": spaces.Discrete(30),  # integer values [0,30]}
-                    # Flying Kick, CRU063
-                    # Scar for a Scar, WTR191
-                    # Torrent of Tempo, CRU069
-                    # Bittering Thorns, CRU072
-                    # Salt the Wound, CRU073
-                    # Springboard Somersault, CRU187
-                    # Whirling Mist Blossom, CRU074
-                    # Brutal Assault, CRU194
-                    # Head Jab, WTR100
-                    # Lunging Press, CRU186
-                    "discard": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
-                    "opp_discard": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
-                    "pitch": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
-                    "opp_pitch": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
-                    "hand": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
-                    "opp_hand": spaces.Discrete(6),  # 0,1,2,3,4,>4
-                    "arsenal": spaces.MultiDiscrete([2, 2, 2, 2, 2, 2, 2, 2, 2, 2]),
-                    "opp_arsenal": spaces.Binary(1),
-                    "resources": spaces.Discrete(3),  # integer value [0,2]
-                    "opp_resources": spaces.Discrete(3),  # integer value [0,2]
-                    "health": spaces.Discrete(21),  # integer values [0,20]
-                    "opp_health": spaces.Discrete(21),  # integer values [0,20]
-                    # Ira
-                    # Lunging Press
-                    # Bittering Thorns
-                    "effects": spaces.MultiBinary(3),
-                    "opp_effects": spaces.MultiBinary(3),
-                    "ap": spaces.Discrete(2),  # integer value [0,1]
-                    "opp_ap": spaces.Discrete(2),  # integer value [0,1]
-                    "turn_player": spaces.Discrete(2, start=1),
-                    # M, P, B, A, D, ARS, PDECK
-                    "turn_phase": spaces.Discrete(9),
-                    # Flying Kick, CRU063
-                    # Scar for a Scar, WTR191
-                    # Torrent of Tempo, CRU069
-                    # Bittering Thorns, CRU072
-                    # Salt the Wound, CRU073
-                    # Springboard Somersault, CRU187
-                    # Whirling Mist Blossom, CRU074
-                    # Brutal Assault, CRU194
-                    # Head Jab, WTR100
-                    # Lunging Press, CRU186
-                    # Edge of Autumn, CRU050
-                    "combat_chain": spaces.MultiDiscrete(
-                        [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2]
-                    ),
-                    "last_played_card": spaces.MultiDiscrete(
-                        [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], start=1
-                    ),
-                },
-                "action_mask": spaces.Discrete(22),
+                "deck_size": spaces.Discrete(31),  # integer values [0,30]}
+                "opp_deck_size": spaces.Discrete(31),  # integer values [0,30]}
+                # Flying Kick, CRU063
+                # Scar for a Scar, WTR191
+                # Torrent of Tempo, CRU069
+                # Bittering Thorns, CRU072
+                # Salt the Wound, CRU073
+                # Springboard Somersault, CRU187
+                # Whirling Mist Blossom, CRU074
+                # Brutal Assault, CRU194
+                # Head Jab, WTR100
+                # Lunging Press, CRU186
+                "discard": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
+                "opp_discard": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
+                "pitch": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
+                "opp_pitch": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
+                "hand": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4]),
+                "opp_hand": spaces.Discrete(6),  # 0,1,2,3,4,>4
+                "arsenal": spaces.MultiDiscrete([2, 2, 2, 2, 2, 2, 2, 2, 2, 2]),
+                "opp_arsenal": spaces.Discrete(2),
+                "resources": spaces.Discrete(3),  # integer value [0,2]
+                "opp_resources": spaces.Discrete(3),  # integer value [0,2]
+                "health": spaces.Discrete(21),  # integer values [0,20]
+                "opp_health": spaces.Discrete(21),  # integer values [0,20]
+                # Ira
+                # Lunging Press
+                # Bittering Thorns
+                "effects": spaces.MultiBinary(3),
+                "opp_effects": spaces.MultiBinary(3),
+                "ap": spaces.Discrete(2),  # integer value [0,1]
+                "opp_ap": spaces.Discrete(2),  # integer value [0,1]
+                "turn_player": spaces.Discrete(2, start=1),
+                # M, P, B, A, D, ARS, PDECK
+                "turn_phase": spaces.Discrete(9),
+                # Flying Kick, CRU063
+                # Scar for a Scar, WTR191
+                # Torrent of Tempo, CRU069
+                # Bittering Thorns, CRU072
+                # Salt the Wound, CRU073
+                # Springboard Somersault, CRU187
+                # Whirling Mist Blossom, CRU074
+                # Brutal Assault, CRU194
+                # Head Jab, WTR100
+                # Lunging Press, CRU186
+                # Edge of Autumn, CRU050
+                "combat_chain": spaces.MultiDiscrete([4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2]),
+                "last_played_card": spaces.MultiDiscrete(
+                    [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+                ),
+                #"action_mask": spaces.Discrete(22),
             }
         )
+
         # Same 11 as observation_space["last_played_card"]
         # but with a 12th option for passing
         # 0 is not played, 1 is from hand, 2 from arsenal
         # Edge of Autumn and
 
-    @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
         return spaces.Discrete(22)
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, **kwargs):
         self.name = ""
         self.players = {
             "p1": {
@@ -275,7 +274,9 @@ class raw_env(AECEnv):
 
         # Send the SubmitSideboard request for p1
         f_sb = requests.post(
-            self.base_url + "/APIs/SubmitSideboard.php", json={**first["lobby"], **f_submission}, timeout=2
+            self.base_url + "/APIs/SubmitSideboard.php",
+            json={**first["lobby"], **f_submission},
+            timeout=2,
         )
         f_sb.raise_for_status()
 
@@ -299,7 +300,9 @@ class raw_env(AECEnv):
 
         # Send the SubmitSideboard request for p2
         s_sb = requests.post(
-            self.base_url + "APIs/SubmitSideboard.php", json={**second["lobby"], **s_submission}, timeout=2
+            self.base_url + "APIs/SubmitSideboard.php",
+            json={**second["lobby"], **s_submission},
+            timeout=2,
         )
         s_sb.raise_for_status()
 
@@ -401,11 +404,9 @@ class raw_env(AECEnv):
             "pitch": self._count_deck_cards(self.state[agent], "playerPitch"),
             "opp_pitch": self._count_deck_cards(self.state[agent], "opponentPitch"),
             "hand": self._count_deck_cards(self.state[agent], "playerHand"),
-            "opp_hand": len(self._count_deck_cards(self.state[agent], "opponentHand")),
+            "opp_hand": len(self.state[agent]["opponentHand"]) if len(self.state[agent]["opponentHand"])< 5 else 5,
             "arsenal": self._count_deck_cards(self.state[agent], "playerArse"),
-            "opp_arsenal": len(
-                self._count_deck_cards(self.state[agent], "opponentArse")
-            ),
+            "opp_arsenal": len(self.state[agent]["opponentArse"]),
             "resources": self.state[agent]["playerPitchCount"],
             "opp_resources": self.state[agent]["opponentPitchCount"],
             "health": self.state[agent]["playerHealth"],
@@ -507,7 +508,7 @@ class raw_env(AECEnv):
             for agent in self.agents
         }
 
-        return observations  
+        return observations
 
     def _state_str_to_int(self):
         keys = [
@@ -519,6 +520,7 @@ class raw_env(AECEnv):
             "opponentHealth",
             "playerAP",
             "opponentAP",
+            "turnPlayer"
         ]
         for agent in self.agents:
             for key, val in self.state[agent].items():

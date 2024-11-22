@@ -1,74 +1,200 @@
 from IraWelcome.ira_welcome import ira_welcome_v0
-from sb3_contrib import MaskablePPO
-from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-from sb3_contrib.common.wrappers import ActionMasker
-import pettingzoo.utils
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchrl.modules import MaskedCategorical
 
-class SB3ActionMaskWrapper(pettingzoo.utils.BaseWrapper):
-    """Wrapper to allow PettingZoo environments to be used with SB3 illegal action masking."""
+def flatten_obs(obs):
+    flat = []
+    for val in obs.values():
+        if isinstance(val, list):
+            for v in val:
+                flat.append(v)
+        else:
+            flat.append(val)
+    return flat
 
-    def reset(self, seed=None, options=None):
-        """Gymnasium-like reset function which assigns obs/action spaces to be the same for each agent.
+class Agent(nn.Module):
+    def __init__(self, num_actions=22):
+        super().__init__()
 
-        This is required as SB3 is designed for single-agent RL and doesn't expect obs/action spaces to be functions
-        """
-        super().reset(seed, options)
+        self.network = nn.Sequential(
+            nn.Linear(100, 80),
+            nn.ReLU(),
+            nn.Linear(80, 60),
+            nn.ReLU(),
+            nn.Linear(60, 40),
+            nn.ReLU(),
+            )
+        self.actor = nn.Sequential(nn.Linear(40, num_actions), nn.Softmax())
+        self.critic = nn.Linear(40, 1)
+        self.bfloat16()
 
-        # Strip the action mask out from the observation space
-        self.observation_space = super().observation_space(self.possible_agents[0])[
-            "observation"
-        ]
-        self.action_space = super().action_space(self.possible_agents[0])
-
-        # Return initial observation, info (PettingZoo AEC envs do not by default)
-        return self.observe(self.agent_selection), {}
-
-    def step(self, action):
-        """Gymnasium-like step function, returning observation, reward, termination, truncation, info."""
-        super().step(action)
-        return super().last()
-
-    def observe(self, agent):
-        """Return only raw observation, removing action mask."""
-        return super().observe(agent)["observation"]
-
-    def action_mask(self):
-        """Separate function used in order to access the action mask."""
-        return super().observe(self.agent_selection)["action_mask"]
+    def get_action_and_value(self, x_obs, device, action=None, mask=None):        
+        hidden = self.network(x_obs)
+        logits = self.actor(hidden)
+        probs = MaskedCategorical(logits=logits, mask=mask)
+        if action is None:
+            action = probs.sample()
+        return action, probs.entropy(), probs.log_prob(action), self.critic(hidden)
 
 
-def mask_fn(env):
-    # Do whatever you'd like in this function to return the action mask
-    # for the current env. In this example, we assume the env has a
-    # helpful method we can rely on.
-    return env.get_mask()
 
-def train_action_mask(env_fn, steps=10_000, seed=0, **env_kwargs):
-    env = env_fn.env(**env_kwargs)
+def batchify(x, device):
+    """Converts PZ style returns to batch of torch arrays."""
+    # convert to list of np arrays
+    x = np.stack([x[a] for a in x], axis=0)
+    # convert to torch
+    x = torch.tensor(x).to(device)
 
-    print(f"Starting training on {str(env.metadata['name'])}.")
-
-    # Custom wrapper to convert PettingZoo envs to work with SB3 action masking
-    env = SB3ActionMaskWrapper(env)
-
-    env.reset(seed=seed)  # Must call reset() in order to re-define the spaces
-
-    env = ActionMasker(env, mask_fn)
-    model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1)
-    model.set_random_seed(seed)
-    model.learn(total_timesteps=steps)
-
-    model.save(f"{env.unwrapped.metadata.get('name')}_{time.strftime('%Y%m%d-%H%M%S')}")
-
-    print("Model has been saved.")
-
-    print(f"Finished training on {str(env.unwrapped.metadata['name'])}.\n")
-
-    env.close()
+    return x
+   
 if __name__ == "__main__":
+    """ALGO PARAMS"""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    total_episodes = 60
+    max_cycles = 500 # initial guess on upper limit of prio passes
+    # consider changing to a per turn and match to whats in the env truncation?
+    # Wondering how the priority pass with no rewards effect this
+    n_epochs = 3
 
-    env_fn = ira_welcome_v0
+    flat_obs_size = 100
+    ent_coef = 0.1
+    vf_coef = 0.1
+    clip_coef = 0.1
+    gamma = 0.99
+    batch_size = 32
+    """ ENV SETUP """
+    env = ira_welcome_v0.env()
+    num_agents = len(env.possible_agents)
 
-    env_kwargs = {}
+    """ LEARNER SETUP """
+    policy = Agent().to(device)
+    optimizer = optim.Adam(policy.parameters(), lr=0.001, eps=1e-5)
+    """ TRAINING LOGIC """
+    #    train for n number of episodes
+    episode_rewards = []
+    rb_obs = torch.zeros((max_cycles, num_agents, flat_obs_size)).to(device)
+    rb_actions = torch.zeros((max_cycles, num_agents)).to(device)
+    rb_logprobs = torch.zeros((max_cycles, num_agents)).to(device)
+    rb_rewards = torch.zeros((max_cycles, num_agents)).to(device)
+    rb_terms = torch.zeros((max_cycles, num_agents)).to(device)
+    rb_values = torch.zeros((max_cycles, num_agents)).to(device)
+    rb_mask = torch.zeros((max_cycles, num_agents, 22)).to(device)
+    for episode in range(total_episodes):
+        # collect an episode
+        print(episode)
+        with torch.no_grad():
+            # collect observations and convert to batch of torch tensors
+            observation, info = env.reset(seed=None)
+            # reset the episodic return
+            total_episodic_reward = 0
+            step = 0
+            for agent in env.agent_iter():
+                observation, reward, termination, truncation, info = env.last()
 
-    train_action_mask(env_fn, steps=20_480, seed=0, **env_kwargs)
+                if termination or truncation:
+                    end_step = step+1
+                    action = None
+                else:
+                    if (
+                        isinstance(observation, dict)
+                        and "action_mask" in observation[agent]
+                    ):
+                        mask = observation[agent]["action_mask"]
+                    else:
+                        mask = np.ones(22)
+                    tensor_obs = torch.tensor(flatten_obs(observation[agent]["observation"])).type(torch.bfloat16).to(device)
+                    tensor_mask = torch.BoolTensor(mask).to(device)
+                    # Store state
+                    action, _, logprobs, values = policy.get_action_and_value(tensor_obs, device, mask=tensor_mask)
+                env.step(action)
+                # add to episode storage
+                if action:
+                    rb_obs[step] = tensor_obs
+                    rb_rewards[step] = torch.tensor(reward).to(device)
+                    rb_terms[step] = torch.tensor(termination).to(device)
+                    rb_actions[step] = action
+                    rb_logprobs[step] = logprobs
+                    rb_values[step] = values.flatten()
+                    rb_mask[step] = tensor_mask
+                    total_episodic_reward += reward
+                    step += 1
+
+            env.close()
+        episode_rewards.append(total_episodic_reward)
+        with torch.no_grad():
+            rb_advantages = torch.zeros_like(rb_rewards).to(device)
+            for t in reversed(range(end_step)):
+                delta = (
+                    rb_rewards[t]
+                    + gamma * rb_values[t + 1] * rb_terms[t + 1]
+                    - rb_values[t]
+                )
+                rb_advantages[t] = delta + gamma * gamma * rb_advantages[t + 1]
+            rb_returns = rb_advantages + rb_values
+ # convert our episodes to batch of individual transitions
+        b_obs = torch.flatten(rb_obs[:end_step], start_dim=0, end_dim=1).type(torch.bfloat16)
+        b_logprobs = torch.flatten(rb_logprobs[:end_step], start_dim=0, end_dim=1)
+        b_actions = torch.flatten(rb_actions[:end_step], start_dim=0, end_dim=1)
+        b_returns = torch.flatten(rb_returns[:end_step], start_dim=0, end_dim=1)
+        b_values = torch.flatten(rb_values[:end_step], start_dim=0, end_dim=1)
+        b_advantages = torch.flatten(rb_advantages[:end_step], start_dim=0, end_dim=1)
+        b_mask = rb_mask[:end_step].flatten(start_dim=0, end_dim=1).type(torch.bool)
+
+        # Optimizing the policy and value network
+        b_index = np.arange(len(b_obs))
+        clip_fracs = []
+        for repeat in range(2):
+            # shuffle the indices we use to access the data
+            np.random.shuffle(b_index)
+            for start in range(0, len(b_obs), batch_size):
+                # select the indices we want to train on
+                end = start + batch_size
+                batch_index = b_index[start:end]
+                _, newlogprob, entropy, value= policy.get_action_and_value(
+                    b_obs[batch_index], device, action=b_actions.long()[batch_index], mask=b_mask[batch_index]
+                )
+                logratio = newlogprob - b_logprobs[batch_index]
+                ratio = logratio.exp()
+
+                with torch.no_grad():
+                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    old_approx_kl = (-logratio).mean()
+                    approx_kl = ((ratio - 1) - logratio).mean()
+                    clip_fracs += [
+                        ((ratio - 1.0).abs() > clip_coef).float().mean().item()
+                    ]
+
+                # normalize advantaegs
+                advantages = b_advantages[batch_index]
+                advantages = (advantages - advantages.mean()) / (
+                    advantages.std() + 1e-8
+                )
+
+                # Policy loss
+                pg_loss1 = -b_advantages[batch_index] * ratio
+                pg_loss2 = -b_advantages[batch_index] * torch.clamp(
+                    ratio, 1 - clip_coef, 1 + clip_coef
+                )
+                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+                # Value loss
+                value = value.flatten()
+                v_loss_unclipped = (value - b_returns[batch_index]) ** 2
+                v_clipped = b_values[batch_index] + torch.clamp(
+                    value - b_values[batch_index],
+                    -clip_coef,
+                    clip_coef,
+                )
+                v_loss_clipped = (v_clipped - b_returns[batch_index]) ** 2
+                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                v_loss = 0.5 * v_loss_max.mean()
+
+                entropy_loss = entropy.mean()
+                loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+

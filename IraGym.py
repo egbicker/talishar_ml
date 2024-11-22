@@ -1,13 +1,11 @@
-from IraWelcomeEnv import IraWelcomeEnv
+from IraWelcome.ira_welcome import ira_welcome_v0
 
-base_url = "http://localhost/Talishar-Dev/Talishar/"
+env = ira_welcome_v0.env()
 
-env = IraWelcomeEnv(base_url)
 env.reset()
 
 for agent in env.agent_iter():
     observation, reward, termination, truncation, info = env.last()
-
     if termination or truncation:
         action = None
     else:
