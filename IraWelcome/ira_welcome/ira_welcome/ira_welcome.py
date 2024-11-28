@@ -73,7 +73,8 @@ class raw_env(AECEnv):
         self.card_effects = ["CRU046", "CRU072", "CRU186"]
         self.state = {}
         self.state_hist = []
-        self.obs_max = [30,30, 3*np.ones(50), 6, np.ones(11),2,2,20,20,np.ones(8),2,8,3*np.ones(10), np.ones(12)]
+        obs_max = [[30,30], np.ones(50)*3, [6], np.ones(11),[2,2,20,20],np.ones(8),[2,8],3*np.ones(10), np.ones(12)]
+        self.obs_max = [m for max in obs_max for m in max]
 
     def observation_space(self,agent):
         return spaces.Dict(
@@ -510,6 +511,11 @@ class raw_env(AECEnv):
 
         return observations
 
+    def calc_rewards(self, next_agent):
+        reward_p_health = self.state[self.agent_selection]["playerHealth"] - self.state_hist[-1][self.agent_selection]["playerHealth"]
+        reward_o_health = self.state[self.agent_selection]["opponentHealth"] - self.state_hist[-1][self.agent_selection]["opponentHealth"]
+        return {self.agent_selection : reward_o_health - reward_p_health, next_agent: reward_p_health - reward_o_health}
+
     def _state_str_to_int(self):
         keys = [
             "playerDeckCount",
@@ -648,7 +654,7 @@ class raw_env(AECEnv):
             + self.state[self.agent_selection]["playerDeckCount"]
         )
         opp_cards = (
-            len(self.state[self.agent_selection]["opponentHand"])
+            len(self.state[self.agent_selection]["opponentHand"]) 
             + self.state[self.agent_selection]["opponentDeckCount"]
         )
 
@@ -656,13 +662,13 @@ class raw_env(AECEnv):
         # check if there is a winner
         if over:
             if self.state[self.agent_selection]["opponentHealth"] <= 0:
-                self.rewards[self.agent_selection] += 1
-                self.rewards[next_agent] -= 1
+                self.rewards[self.agent_selection] += 100
+                self.rewards[next_agent] -= 100
                 self.terminations = {i: True for i in self.agents}
 
             elif self.state[self.agent_selection]["playerHealth"] <= 0:
-                self.rewards[self.agent_selection] -= 1
-                self.rewards[next_agent] += 1
+                self.rewards[self.agent_selection] -= 100
+                self.rewards[next_agent] += 100
                 self.terminations = {i: True for i in self.agents}
 
         elif player_cards + opp_cards == 0:
@@ -675,6 +681,7 @@ class raw_env(AECEnv):
         else:
             self._action_to_request(action, self.agent_selection)
         self.state_hist.append(self.state)
+        self.cumulative_rewards= self.calc_rewards(next_agent)
 
         if not self.state[self.agent_selection]["havePriority"]:
             self.agent_selection = next_agent

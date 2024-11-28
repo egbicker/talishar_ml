@@ -20,24 +20,26 @@ class Agent(nn.Module):
         super().__init__()
 
         self.network = nn.Sequential(
-            nn.Linear(100, 80),
+            nn.Linear(100, 70),
             nn.ReLU(),
-            nn.Linear(80, 60),
+            nn.Linear(70, 60),
             nn.ReLU(),
-            nn.Linear(60, 40),
+            nn.Linear(60, 50),
+            nn.ReLU(),
+            nn.Linear(50, 40),
             nn.ReLU(),
             )
         self.actor = nn.Sequential(nn.Linear(40, num_actions), nn.Softmax())
         self.critic = nn.Linear(40, 1)
         self.bfloat16()
 
-    def get_action_and_value(self, x_obs, device, action=None, mask=None):        
+    def get_action_and_value(self, x_obs, device, action=None, mask=None):
         hidden = self.network(x_obs)
-        logits = self.actor(hidden)
+        logits = torch.logit(self.actor(hidden))
         probs = MaskedCategorical(logits=logits, mask=mask)
         if action is None:
             action = probs.sample()
-        return action, probs.entropy(), probs.log_prob(action), self.critic(hidden)
+        return action, probs.log_prob(action), probs.entropy(),  self.critic(hidden)
 
 
 
@@ -62,9 +64,9 @@ if __name__ == "__main__":
     flat_obs_size = 100
     ent_coef = 0.1
     vf_coef = 0.1
-    clip_coef = 0.1
+    clip_coef = 0.2
     gamma = 0.99
-    batch_size = 32
+    batch_size = 1
     """ ENV SETUP """
     env = ira_welcome_v0.env()
     num_agents = len(env.possible_agents)
@@ -105,22 +107,26 @@ if __name__ == "__main__":
                         mask = observation[agent]["action_mask"]
                     else:
                         mask = np.ones(22)
-                    tensor_obs = torch.tensor(flatten_obs(observation[agent]["observation"])).type(torch.bfloat16).to(device)
+                    tensor_obs = {"p1":torch.tensor([o/m for o,m in zip(flatten_obs(observation["p1"]["observation"]),env.obs_max)]).type(torch.bfloat16).to(device),
+                    "p2":torch.tensor([o/m for o,m in zip(flatten_obs(observation["p2"]["observation"]),env.obs_max)]).type(torch.bfloat16).to(device)
+                    }
                     tensor_mask = torch.BoolTensor(mask).to(device)
                     # Store state
-                    action, _, logprobs, values = policy.get_action_and_value(tensor_obs, device, mask=tensor_mask)
+                    action, _, logprobs, values = policy.get_action_and_value(tensor_obs[agent], device, mask=tensor_mask)
                 env.step(action)
                 # add to episode storage
                 if action:
-                    rb_obs[step] = tensor_obs
+                    rb_obs[step][0] = tensor_obs["p1"]
+                    rb_obs[step][1]  = tensor_obs["p2"]
                     rb_rewards[step] = torch.tensor(reward).to(device)
-                    rb_terms[step] = torch.tensor(termination).to(device)
-                    rb_actions[step] = action
-                    rb_logprobs[step] = logprobs
-                    rb_values[step] = values.flatten()
-                    rb_mask[step] = tensor_mask
-                    total_episodic_reward += reward
+                    rb_terms[step][:] = torch.tensor(termination).to(device)
+                    rb_actions[step][:] = action
+                    rb_logprobs[step][:] = logprobs
+                    rb_values[step][:] = values.flatten()
+                    rb_mask[step][:] = tensor_mask
+
                     step += 1
+                total_episodic_reward += reward
 
             env.close()
         episode_rewards.append(total_episodic_reward)
@@ -135,6 +141,7 @@ if __name__ == "__main__":
                 rb_advantages[t] = delta + gamma * gamma * rb_advantages[t + 1]
             rb_returns = rb_advantages + rb_values
  # convert our episodes to batch of individual transitions
+        print(end_step)
         b_obs = torch.flatten(rb_obs[:end_step], start_dim=0, end_dim=1).type(torch.bfloat16)
         b_logprobs = torch.flatten(rb_logprobs[:end_step], start_dim=0, end_dim=1)
         b_actions = torch.flatten(rb_actions[:end_step], start_dim=0, end_dim=1)
@@ -142,11 +149,10 @@ if __name__ == "__main__":
         b_values = torch.flatten(rb_values[:end_step], start_dim=0, end_dim=1)
         b_advantages = torch.flatten(rb_advantages[:end_step], start_dim=0, end_dim=1)
         b_mask = rb_mask[:end_step].flatten(start_dim=0, end_dim=1).type(torch.bool)
-
         # Optimizing the policy and value network
         b_index = np.arange(len(b_obs))
         clip_fracs = []
-        for repeat in range(2):
+        for repeat in range(n_epochs):
             # shuffle the indices we use to access the data
             np.random.shuffle(b_index)
             for start in range(0, len(b_obs), batch_size):
@@ -178,6 +184,8 @@ if __name__ == "__main__":
                 pg_loss2 = -b_advantages[batch_index] * torch.clamp(
                     ratio, 1 - clip_coef, 1 + clip_coef
                 )
+                #torch.set_printoptions(profile="full")
+
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 # Value loss
@@ -194,7 +202,7 @@ if __name__ == "__main__":
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
-                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                optimizer.zero_grad()
 
